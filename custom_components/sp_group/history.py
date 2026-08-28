@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from .client import PeriodReading
+from .client import SG_TZ, PeriodReading
 
 
 @dataclass(frozen=True)
@@ -28,3 +28,30 @@ def cumulative_points(
         else:
             points.append(CumulativePoint(start=hour, cumulative=total))
     return points
+
+
+def fold_half_hours(
+    periods: tuple[PeriodReading, ...] | list[PeriodReading],
+) -> tuple[PeriodReading, ...]:
+    """Sum 30-minute AMI slots into SGT clock hours for Energy statistics."""
+    buckets: dict[datetime, float] = {}
+    for item in periods:
+        hour = item.start.astimezone(SG_TZ).replace(minute=0, second=0, microsecond=0)
+        buckets[hour] = buckets.get(hour, 0.0) + item.amount
+    return tuple(
+        PeriodReading(start=start, amount=amount)
+        for start, amount in sorted(buckets.items())
+    )
+
+
+def merge_ami_periods(
+    daily: tuple[PeriodReading, ...] | list[PeriodReading],
+    hourly: tuple[PeriodReading, ...] | list[PeriodReading],
+) -> tuple[PeriodReading, ...]:
+    """Prefer half-hourly AMI on days that have it; keep daily points before that."""
+    hourly_days = {item.start.astimezone(SG_TZ).date() for item in hourly}
+    merged = [
+        item for item in daily if item.start.astimezone(SG_TZ).date() not in hourly_days
+    ]
+    merged.extend(hourly)
+    return tuple(sorted(merged, key=lambda item: item.start))

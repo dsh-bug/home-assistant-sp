@@ -78,12 +78,15 @@ class SpGroupCoordinator(DataUpdateCoordinator[UsageReadings]):
     def _history_series(
         self, usage: UsageReadings
     ) -> list[tuple[str, tuple, str, str]]:
+        from .mapper import electricity_graph_periods
+
         series: list[tuple[str, tuple, str, str]] = []
         if usage.electricity is not None:
+            periods = electricity_graph_periods(usage)
             series.append(
                 (
                     SENSOR_KEY_ELECTRICITY,
-                    usage.electricity.periods,
+                    periods if periods else usage.electricity.periods,
                     UNIT_KWH,
                     "energy",
                 )

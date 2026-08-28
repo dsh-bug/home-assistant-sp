@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 
-from .client import PeriodReading, UsageReadings, UtilitySeries
+from .client import SG_TZ, PeriodReading, UsageReadings, UtilitySeries
 from .const import (
     DEVICE_CLASS_ENERGY,
     DEVICE_CLASS_GAS,
@@ -13,7 +14,9 @@ from .const import (
     ENTITY_CATEGORY_DIAGNOSTIC,
     SENSOR_KEY_ACCOUNT,
     SENSOR_KEY_ELECTRICITY,
+    SENSOR_KEY_ELECTRICITY_HOUR,
     SENSOR_KEY_ELECTRICITY_LAST,
+    SENSOR_KEY_ELECTRICITY_TODAY,
     SENSOR_KEY_GAS,
     SENSOR_KEY_GAS_LAST,
     SENSOR_KEY_PPMS,
@@ -25,6 +28,7 @@ from .const import (
     UNIT_M3,
     UNIT_SGD,
 )
+from .history import fold_half_hours, merge_ami_periods
 
 
 @dataclass(frozen=True)
@@ -59,6 +63,39 @@ def _series_device_class(series: UtilitySeries, kind: str) -> str:
     return DEVICE_CLASS_GAS
 
 
+def electricity_graph_periods(usage: UsageReadings) -> tuple[PeriodReading, ...]:
+    hourly = fold_half_hours(usage.ami_hourly)
+    merged = merge_ami_periods(usage.ami_daily, hourly)
+    if merged:
+        return merged
+    return usage.electricity.periods if usage.electricity else ()
+
+
+def _today_kwh(usage: UsageReadings) -> float | None:
+    hourly = fold_half_hours(usage.ami_hourly)
+    if not hourly:
+        return None
+    today = datetime.now(SG_TZ).date()
+    return sum(
+        item.amount for item in hourly if item.start.astimezone(SG_TZ).date() == today
+    )
+
+
+def _last_hour_kwh(usage: UsageReadings) -> float | None:
+    hourly = fold_half_hours(usage.ami_hourly)
+    if not hourly:
+        return None
+    now = datetime.now(SG_TZ)
+    complete = [
+        item
+        for item in hourly
+        if item.start.astimezone(SG_TZ) + timedelta(hours=1) <= now
+    ]
+    if not complete:
+        return None
+    return max(complete, key=lambda item: item.start).amount
+
+
 def extra_attributes(usage: UsageReadings, key: str) -> dict[str, object]:
     """Premise metadata plus last billed period for the matching utility."""
     premise = usage.premise
@@ -82,8 +119,27 @@ def extra_attributes(usage: UsageReadings, key: str) -> dict[str, object]:
             attrs["meter_reading_end"] = reading.end
         return _omit_none(attrs)
     series: UtilitySeries | None
-    if key in {SENSOR_KEY_ELECTRICITY, SENSOR_KEY_ELECTRICITY_LAST}:
+    if key in {
+        SENSOR_KEY_ELECTRICITY,
+        SENSOR_KEY_ELECTRICITY_LAST,
+        SENSOR_KEY_ELECTRICITY_TODAY,
+        SENSOR_KEY_ELECTRICITY_HOUR,
+    }:
         series = usage.electricity
+        if key == SENSOR_KEY_ELECTRICITY:
+            graph = electricity_graph_periods(usage)
+            if graph:
+                last = _last_period(graph)
+                attrs["period_count"] = len(graph)
+                attrs["ami_half_hour_count"] = len(usage.ami_hourly)
+                attrs["ami_daily_count"] = len(usage.ami_daily)
+                if last is not None:
+                    attrs["last_period"] = last.start.isoformat()
+                    attrs["last_period_amount"] = last.amount
+                today = _today_kwh(usage)
+                if today is not None:
+                    attrs["today_kwh"] = today
+                return _omit_none(attrs)
     elif key in {SENSOR_KEY_WATER, SENSOR_KEY_WATER_LAST}:
         series = usage.water
     elif key in {SENSOR_KEY_GAS, SENSOR_KEY_GAS_LAST}:
@@ -104,15 +160,13 @@ def extra_attributes(usage: UsageReadings, key: str) -> dict[str, object]:
     return _omit_none(attrs)
 
 
-def _last_spec(
-    key: str, series: UtilitySeries, kind: str, precision: int
-) -> SensorSpec:
+def _last_spec(key: str, series: UtilitySeries, precision: int) -> SensorSpec:
     last = _last_period(series.periods)
     return SensorSpec(
         key=key,
         translation_key=key,
         native_value=last.amount if last is not None else None,
-        device_class=_series_device_class(series, kind),
+        device_class=None,
         state_class=STATE_CLASS_MEASUREMENT,
         unit_of_measurement=series.unit,
         suggested_display_precision=precision,
@@ -125,20 +179,48 @@ def sensors_from_usage(usage: UsageReadings | None) -> list[SensorSpec]:
         return []
     specs: list[SensorSpec] = []
     if usage.electricity is not None:
+        graph = electricity_graph_periods(usage)
+        elec_total = (
+            sum(item.amount for item in graph) if graph else usage.electricity.total
+        )
         specs.append(
             SensorSpec(
                 key=SENSOR_KEY_ELECTRICITY,
                 translation_key=SENSOR_KEY_ELECTRICITY,
-                native_value=usage.electricity.total,
+                native_value=elec_total,
                 device_class=DEVICE_CLASS_ENERGY,
                 state_class=STATE_CLASS_TOTAL_INCREASING,
                 unit_of_measurement=UNIT_KWH,
                 suggested_display_precision=1,
             )
         )
-        specs.append(
-            _last_spec(SENSOR_KEY_ELECTRICITY_LAST, usage.electricity, "elec", 1)
-        )
+        specs.append(_last_spec(SENSOR_KEY_ELECTRICITY_LAST, usage.electricity, 1))
+        today = _today_kwh(usage)
+        if today is not None:
+            specs.append(
+                SensorSpec(
+                    key=SENSOR_KEY_ELECTRICITY_TODAY,
+                    translation_key=SENSOR_KEY_ELECTRICITY_TODAY,
+                    native_value=today,
+                    device_class=None,
+                    state_class=STATE_CLASS_MEASUREMENT,
+                    unit_of_measurement=UNIT_KWH,
+                    suggested_display_precision=2,
+                )
+            )
+        hour = _last_hour_kwh(usage)
+        if hour is not None:
+            specs.append(
+                SensorSpec(
+                    key=SENSOR_KEY_ELECTRICITY_HOUR,
+                    translation_key=SENSOR_KEY_ELECTRICITY_HOUR,
+                    native_value=hour,
+                    device_class=None,
+                    state_class=STATE_CLASS_MEASUREMENT,
+                    unit_of_measurement=UNIT_KWH,
+                    suggested_display_precision=2,
+                )
+            )
     if usage.water is not None:
         specs.append(
             SensorSpec(
@@ -151,7 +233,7 @@ def sensors_from_usage(usage: UsageReadings | None) -> list[SensorSpec]:
                 suggested_display_precision=2,
             )
         )
-        specs.append(_last_spec(SENSOR_KEY_WATER_LAST, usage.water, "water", 2))
+        specs.append(_last_spec(SENSOR_KEY_WATER_LAST, usage.water, 2))
     if usage.gas is not None:
         gas_class = _series_device_class(usage.gas, "gas")
         precision = 1 if usage.gas.unit == UNIT_KWH else 2
@@ -166,7 +248,7 @@ def sensors_from_usage(usage: UsageReadings | None) -> list[SensorSpec]:
                 suggested_display_precision=precision,
             )
         )
-        specs.append(_last_spec(SENSOR_KEY_GAS_LAST, usage.gas, "gas", precision))
+        specs.append(_last_spec(SENSOR_KEY_GAS_LAST, usage.gas, precision))
     specs.append(
         SensorSpec(
             key=SENSOR_KEY_ACCOUNT,

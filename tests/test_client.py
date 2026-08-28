@@ -19,6 +19,7 @@ from custom_components.sp_group.const import (
     CONTENT_TYPE_JSON,
     HEADER_ID_TOKEN,
     IDENTITY_HOST,
+    JARVIS_AMI_PATH,
     JARVIS_CHARTS_PATH,
     JARVIS_ME_PATH,
     OAUTH_TOKEN_PATH,
@@ -153,6 +154,24 @@ def test_fetch_usage_returns_kwh_and_water_from_charts_fixture() -> None:
         not urlparse_path(req.url).startswith("/jarvis/v3/ppms/balance/")
         for req in transport.requests
     )
+    ami_reqs = [
+        req for req in transport.requests if urlparse_path(req.url) == JARVIS_AMI_PATH
+    ]
+    assert len(ami_reqs) == 2
+    groups = []
+    for req in ami_reqs:
+        assert req.method == "POST"
+        assert req.body is not None
+        payload = json.loads(req.body.decode("utf-8"))
+        groups.append(payload["grouped_by"])
+        assert payload["utility_type"] == "electric"
+        assert payload["premise_id"] == premise_id
+        assert payload["start"].isdigit()
+        assert len(payload["start"]) == 14
+    assert sorted(groups) == ["day", "month"]
+    assert len(usage.ami_hourly) == 4
+    assert len(usage.ami_daily) == 2
+    assert usage.ami_hourly[0].amount == pytest.approx(0.4)
 
 
 def test_me_forbidden_uses_server_error_description() -> None:

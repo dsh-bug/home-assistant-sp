@@ -52,6 +52,12 @@
       "electricity_last_period": {
         "name": "Electricity last billed"
       },
+      "electricity_today": {
+        "name": "Electricity today"
+      },
+      "electricity_last_hour": {
+        "name": "Electricity last hour"
+      },
       "water_last_period": {
         "name": "Water last billed"
       },

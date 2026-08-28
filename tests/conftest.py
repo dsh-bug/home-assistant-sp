@@ -11,6 +11,7 @@ from custom_components.sp_group.client import HttpResponse
 from custom_components.sp_group.const import (
     B2C_HOST,
     IDENTITY_HOST,
+    JARVIS_AMI_PATH,
     JARVIS_CHARTS_PATH,
     JARVIS_ME_PATH,
     JARVIS_PPMS_PATH,
@@ -95,6 +96,21 @@ class FixtureTransport:
                 status=200,
                 headers={"Content-Type": "application/json"},
                 body=load_fixture(self.smrd_fixture),
+            )
+        if method == "POST" and origin == B2C_HOST and path == JARVIS_AMI_PATH:
+            grouped = "day"
+            if body:
+                import json
+
+                payload = json.loads(body.decode("utf-8"))
+                grouped = str(payload.get("grouped_by") or "day")
+            name = (
+                "jarvis_ami_month.json" if grouped == "month" else "jarvis_ami_day.json"
+            )
+            return HttpResponse(
+                status=200,
+                headers={"Content-Type": "application/json"},
+                body=load_fixture(name),
             )
         if (
             method == "GET"
