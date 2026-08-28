@@ -12,6 +12,10 @@ if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
 
+    from .coordinator import SpGroupCoordinator
+
+    type SpGroupConfigEntry = ConfigEntry[SpGroupCoordinator]
+
 PLATFORMS = ["sensor"]
 
 
@@ -48,17 +52,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise ConfigEntryAuthFailed(str(exc)) from exc
     except UsageError as exc:
         raise ConfigEntryNotReady(str(exc)) from exc
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     await coordinator.async_import_billed_history()
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if unload_ok:
-        hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
-    return unload_ok
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:

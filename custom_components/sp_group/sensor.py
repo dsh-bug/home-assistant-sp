@@ -1,4 +1,4 @@
-"""Energy and water sensors for the Energy dashboard."""
+"""Energy, water, gas, and account sensors."""
 
 # mypy: ignore-errors
 
@@ -13,24 +13,29 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfEnergy, UnitOfVolume
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, SENSOR_KEY_ELECTRICITY, SENSOR_KEY_WATER
 from .coordinator import SpGroupCoordinator
+from .entity import SpGroupEntity
 from .mapper import extra_attributes, sensors_from_usage
+
+PARALLEL_UPDATES = 0
 
 _DEVICE_CLASS = {
     "energy": SensorDeviceClass.ENERGY,
     "water": SensorDeviceClass.WATER,
+    "gas": SensorDeviceClass.GAS,
+    "monetary": SensorDeviceClass.MONETARY,
 }
 _STATE_CLASS = {
     "total_increasing": SensorStateClass.TOTAL_INCREASING,
+    "measurement": SensorStateClass.MEASUREMENT,
 }
 _UNITS = {
     "kWh": UnitOfEnergy.KILO_WATT_HOUR,
     "m³": UnitOfVolume.CUBIC_METERS,
+    "SGD": "SGD",
 }
 
 
@@ -39,64 +44,53 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    coordinator: SpGroupCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: SpGroupCoordinator = entry.runtime_data
     usage = coordinator.data
     specs = sensors_from_usage(usage)
     if not specs:
         return
-    entities = [
-        SpGroupSensor(
-            coordinator,
-            spec.key,
-            spec.name,
-            spec.device_class,
-            spec.unit_of_measurement,
-        )
-        for spec in specs
-    ]
-    async_add_entities(entities)
+    async_add_entities([SpGroupSensor(coordinator, spec.key) for spec in specs])
 
 
-class SpGroupSensor(CoordinatorEntity[SpGroupCoordinator], SensorEntity):
-    _attr_has_entity_name = True
-    _attr_attribution = "Data provided by SP Group"
-
-    def __init__(
-        self,
-        coordinator: SpGroupCoordinator,
-        key: str,
-        name: str,
-        device_class: str,
-        unit: str,
-    ) -> None:
-        super().__init__(coordinator)
-        self._key = key
+class SpGroupSensor(SpGroupEntity, SensorEntity):
+    def __init__(self, coordinator: SpGroupCoordinator, key: str) -> None:
+        super().__init__(coordinator, key)
+        spec = self._current_spec()
+        device_class = _DEVICE_CLASS.get(spec.device_class) if spec else None
+        state_class = None
+        if spec is not None and spec.state_class:
+            state_class = _STATE_CLASS.get(spec.state_class)
+        unit = None
+        if spec is not None and spec.unit_of_measurement:
+            unit = _UNITS.get(spec.unit_of_measurement, spec.unit_of_measurement)
+        category = None
+        if spec is not None and spec.entity_category == "diagnostic":
+            category = EntityCategory.DIAGNOSTIC
         self.entity_description = SensorEntityDescription(
             key=key,
-            name=name,
-            device_class=_DEVICE_CLASS[device_class],
-            state_class=_STATE_CLASS["total_increasing"],
-            native_unit_of_measurement=_UNITS[unit],
+            device_class=device_class,
+            state_class=state_class,
+            native_unit_of_measurement=unit,
+            entity_category=category,
+            suggested_display_precision=(
+                spec.suggested_display_precision if spec else None
+            ),
         )
-        premise = coordinator.data.premise_id if coordinator.data else "unknown"
-        self._attr_unique_id = f"{premise}_{key}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, premise)},
-            name="SP Group utilities",
-            manufacturer="SP Group",
-            model="e-account",
+
+    def _current_spec(self):
+        return next(
+            (
+                spec
+                for spec in sensors_from_usage(self.coordinator.data)
+                if spec.key == self._key
+            ),
+            None,
         )
 
     @property
-    def native_value(self) -> float | None:
-        usage = self.coordinator.data
-        if usage is None:
-            return None
-        if self._key == SENSOR_KEY_ELECTRICITY:
-            return usage.electricity_kwh
-        if self._key == SENSOR_KEY_WATER:
-            return usage.water_m3
-        return None
+    def native_value(self) -> float | str | None:
+        spec = self._current_spec()
+        return spec.native_value if spec else None
 
     @property
     def extra_state_attributes(self) -> dict[str, object]:

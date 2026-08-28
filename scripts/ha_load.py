@@ -23,6 +23,9 @@ required = [
     component / "client.py",
     component / "mapper.py",
     component / "coordinator.py",
+    component / "entity.py",
+    component / "diagnostics.py",
+    component / "icons.json",
     component / "strings.json",
 ]
 missing = [str(path) for path in required if not path.is_file()]

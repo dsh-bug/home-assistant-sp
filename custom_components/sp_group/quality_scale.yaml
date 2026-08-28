@@ -1,0 +1,84 @@
+rules:
+  action-setup:
+    status: exempt
+    comment: No custom service actions; polling uses the coordinator and homeassistant.update_entity.
+  appropriate-polling: done
+  brands: done
+  common-modules: done
+  config-flow: done
+  config-flow-test-coverage: todo
+  dependency-transparency:
+    status: exempt
+    comment: No third-party Python requirements; stdlib urllib only.
+  docs-actions:
+    status: exempt
+    comment: No custom service actions.
+  docs-conditions:
+    status: exempt
+    comment: No device automations.
+  docs-high-level-description: done
+  docs-installation-instructions: done
+  docs-removal-instructions: done
+  docs-triggers:
+    status: exempt
+    comment: No device automations.
+  entity-event-setup:
+    status: exempt
+    comment: Coordinator entities; no extra subscriptions.
+  entity-unique-id: done
+  has-entity-name: done
+  runtime-data: done
+  test-before-configure: done
+  test-before-setup: done
+  unique-config-entry: done
+  config-entry-unloading: done
+  docs-configuration-parameters:
+    status: exempt
+    comment: No options besides e-account email and password.
+  docs-installation-parameters: done
+  entity-unavailable: done
+  integration-owner: done
+  log-when-unavailable: done
+  parallel-updates: done
+  reauthentication-flow: done
+  test-coverage: todo
+  devices: done
+  diagnostics: done
+  discovery:
+    status: exempt
+    comment: Cloud e-account, not a discoverable local device.
+  discovery-update-info:
+    status: exempt
+    comment: Cloud e-account, not a discoverable local device.
+  docs-data-update: done
+  docs-examples: todo
+  docs-known-limitations: done
+  docs-supported-devices:
+    status: exempt
+    comment: Cloud e-account, not hardware.
+  docs-supported-functions: done
+  docs-troubleshooting: done
+  docs-use-cases: done
+  dynamic-devices:
+    status: exempt
+    comment: One device per e-account premise.
+  entity-category: done
+  entity-device-class: done
+  entity-disabled-by-default:
+    status: exempt
+    comment: All entities are billed totals or account diagnostics, not noisy.
+  entity-translations: done
+  exception-translations: todo
+  icon-translations: done
+  reconfiguration-flow: done
+  repair-issues: todo
+  stale-devices:
+    status: exempt
+    comment: One device per e-account premise.
+  async-dependency:
+    status: exempt
+    comment: Client is stdlib urllib run in the executor.
+  inject-websession:
+    status: exempt
+    comment: Client is stdlib urllib, not aiohttp.
+  strict-typing: todo

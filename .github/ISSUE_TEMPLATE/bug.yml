@@ -1,0 +1,39 @@
+name: Bug report
+description: Something is wrong with the SP Group integration
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not paste passwords, access tokens, or account numbers.
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant version
+      placeholder: "2026.8.3"
+    validations:
+      required: true
+  - type: input
+    id: integration_version
+    attributes:
+      label: Integration version
+      placeholder: "1.1.0"
+    validations:
+      required: true
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      render: text
+      description: Settings → System → Logs. Redact email addresses and tokens.

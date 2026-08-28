@@ -1,0 +1,21 @@
+{
+  "entity": {
+    "sensor": {
+      "electricity_last_period": {
+        "default": "mdi:flash-outline"
+      },
+      "water_last_period": {
+        "default": "mdi:water-outline"
+      },
+      "gas_last_period": {
+        "default": "mdi:fire"
+      },
+      "account": {
+        "default": "mdi:home-account"
+      },
+      "ppms_credit": {
+        "default": "mdi:cash"
+      }
+    }
+  }
+}

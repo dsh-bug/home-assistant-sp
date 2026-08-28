@@ -1,7 +1,8 @@
 """SP Group Auth0 + Jarvis HTTP client.
 
 Contract taken from APK sg.com.singaporepower.spservices 15.10.0
-(Auth0ApiService, LoginRequest, JarvisApiServiceV2, HistoryChartResponseModel).
+(Auth0ApiService, LoginRequest, JarvisApiServiceV2, HistoryChartResponseModel,
+PremiseResponseModel, PremiseAccountModel, PpmsCreditBalance, MeterReadingModel).
 """
 
 from __future__ import annotations
@@ -31,6 +32,8 @@ from .const import (
     IDENTITY_HOST,
     JARVIS_CHARTS_PATH,
     JARVIS_ME_PATH,
+    JARVIS_PPMS_PATH,
+    JARVIS_SMRD_PATH,
     OAUTH_TOKEN_PATH,
     TOKEN_EXPIRY_BUFFER_SECONDS,
     USER_AGENT,
@@ -47,7 +50,7 @@ class AuthError(Exception):
 
 
 class UsageError(Exception):
-    """Usage payload missing electricity or water readings."""
+    """Usage payload missing billed utility readings."""
 
 
 @dataclass(frozen=True)
@@ -114,17 +117,82 @@ SG_TZ = timezone(timedelta(hours=8))
 class PeriodReading:
     start: datetime
     amount: float
+    previous: float | None = None
+    status: str | None = None
+
+
+@dataclass(frozen=True)
+class UtilitySeries:
+    total: float
+    unit: str
+    periods: tuple[PeriodReading, ...]
+    average: float | None
+    comparison: str | None
+
+
+@dataclass(frozen=True)
+class PremiseInfo:
+    id: str
+    address: str | None
+    account_number: str | None
+    account_status: str | None
+    account_type: str | None
+    premise_type: str | None
+    utilities: tuple[str, ...]
+    ami_elec: bool | None
+    retailer_name: str | None
+    ppms_exists: bool
+
+
+@dataclass(frozen=True)
+class MeterReadingInfo:
+    message: str | None
+    title: str | None
+    start: str | None
+    end: str | None
 
 
 @dataclass(frozen=True)
 class UsageReadings:
-    electricity_kwh: float
-    water_m3: float
-    premise_id: str
-    electricity_unit: str
-    water_unit: str
-    electricity_periods: tuple[PeriodReading, ...]
-    water_periods: tuple[PeriodReading, ...]
+    premise: PremiseInfo
+    electricity: UtilitySeries | None
+    water: UtilitySeries | None
+    gas: UtilitySeries | None
+    meter_reading: MeterReadingInfo | None = None
+    ppms_credit: float | None = None
+    ppms_updated_at: str | None = None
+
+    @property
+    def premise_id(self) -> str:
+        return self.premise.id
+
+    @property
+    def electricity_kwh(self) -> float:
+        return self.electricity.total if self.electricity else 0.0
+
+    @property
+    def water_m3(self) -> float:
+        return self.water.total if self.water else 0.0
+
+    @property
+    def electricity_unit(self) -> str:
+        return self.electricity.unit if self.electricity else "kWh"
+
+    @property
+    def water_unit(self) -> str:
+        return self.water.unit if self.water else "m³"
+
+    @property
+    def electricity_periods(self) -> tuple[PeriodReading, ...]:
+        return self.electricity.periods if self.electricity else ()
+
+    @property
+    def water_periods(self) -> tuple[PeriodReading, ...]:
+        return self.water.periods if self.water else ()
+
+    @property
+    def gas_periods(self) -> tuple[PeriodReading, ...]:
+        return self.gas.periods if self.gas else ()
 
 
 def _decode_json(body: bytes) -> object:
@@ -147,6 +215,25 @@ def _float(value: object) -> float:
     if isinstance(value, str) and value:
         return float(value)
     return 0.0
+
+
+def _optional_float(value: object) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str) and value:
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _optional_str(value: object) -> str | None:
+    if isinstance(value, str) and value:
+        return value
+    return None
 
 
 def _jwt_exp(token: str) -> int | None:
@@ -201,6 +288,19 @@ def _normalize_volume_unit(unit: str) -> str:
     return unit or "m³"
 
 
+def _energy_or_volume_unit(unit: str, kind: str) -> str:
+    compact = unit.replace(" ", "").lower()
+    if kind == "elec":
+        if unit and compact not in {"kwh", "kw·h"}:
+            raise UsageError(f"unexpected electricity unit {unit!r}")
+        return "kWh"
+    if kind == "water":
+        return _normalize_volume_unit(unit)
+    if compact in {"kwh", "kw·h"}:
+        return "kWh"
+    return _normalize_volume_unit(unit)
+
+
 def _parse_period_start(value: object) -> datetime | None:
     if not isinstance(value, str) or not value:
         return None
@@ -214,30 +314,102 @@ def _parse_period_start(value: object) -> datetime | None:
     return parsed
 
 
-def _billed_periods(
-    utility: object, label: str
-) -> tuple[float, str, tuple[PeriodReading, ...]]:
-    model = _require_mapping(utility, label)
-    data = model.get("data")
+def _parse_utility(utility: object, kind: str) -> UtilitySeries | None:
+    if not isinstance(utility, dict):
+        return None
+    data = utility.get("data")
     if not isinstance(data, list) or not data:
-        raise UsageError(f"{label} has no billed periods")
+        return None
     total = 0.0
     unit = ""
     periods: list[PeriodReading] = []
     for row in data:
-        item = _require_mapping(row, f"{label} period")
+        item = _require_mapping(row, f"{kind} period")
         raw_unit = item.get("unit")
         if isinstance(raw_unit, str) and raw_unit:
             unit = raw_unit
         consumption = item.get("consumption")
         if not isinstance(consumption, dict):
-            raise UsageError(f"{label} period missing consumption")
+            raise UsageError(f"{kind} period missing consumption")
         amount = _float(consumption.get("current"))
         total += amount
         start = _parse_period_start(item.get("period"))
+        status = _optional_str(item.get("status"))
+        previous = _optional_float(consumption.get("previous"))
         if start is not None:
-            periods.append(PeriodReading(start=start, amount=amount))
-    return total, unit, tuple(periods)
+            periods.append(
+                PeriodReading(
+                    start=start, amount=amount, previous=previous, status=status
+                )
+            )
+    if not periods:
+        return None
+    return UtilitySeries(
+        total=total,
+        unit=_energy_or_volume_unit(unit, kind),
+        periods=tuple(periods),
+        average=_optional_float(utility.get("average_consumption")),
+        comparison=_optional_str(utility.get("comparison_message"))
+        or _optional_str(utility.get("comparison_type")),
+    )
+
+
+def _first_account(premise: dict[str, object]) -> dict[str, object]:
+    accounts = premise.get("accounts")
+    if isinstance(accounts, list) and accounts and isinstance(accounts[0], dict):
+        return accounts[0]
+    return {}
+
+
+def _string_tuple(value: object) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    return tuple(item for item in value if isinstance(item, str) and item)
+
+
+def _parse_premise(premise: dict[str, object]) -> PremiseInfo:
+    premise_id = premise.get("id")
+    if not isinstance(premise_id, str) or not premise_id:
+        raise UsageError("premise id missing")
+    account = _first_account(premise)
+    contestable = premise.get("contestable_details")
+    contestable_map = contestable if isinstance(contestable, dict) else {}
+    meter = premise.get("meter_details")
+    meter_map = meter if isinstance(meter, dict) else {}
+    ami = meter_map.get("ami_elec")
+    ppms = premise.get("ppms_details")
+    ppms_exists = False
+    if isinstance(ppms, dict) and ppms.get("exists") is True:
+        ppms_exists = True
+    return PremiseInfo(
+        id=premise_id,
+        address=_optional_str(premise.get("address"))
+        or _optional_str(account.get("address")),
+        account_number=_optional_str(account.get("account_number")),
+        account_status=_optional_str(account.get("account_status")),
+        account_type=_optional_str(account.get("account_type")),
+        premise_type=_optional_str(premise.get("type")),
+        utilities=_string_tuple(account.get("utilities")),
+        ami_elec=ami if isinstance(ami, bool) else None,
+        retailer_name=_optional_str(contestable_map.get("retailer_name")),
+        ppms_exists=ppms_exists,
+    )
+
+
+def _parse_meter_reading(body: object) -> MeterReadingInfo | None:
+    if not isinstance(body, dict):
+        return None
+    period = body.get("latest_submission_period")
+    period_map = period if isinstance(period, dict) else {}
+    info = MeterReadingInfo(
+        message=_optional_str(body.get("message")),
+        title=_optional_str(period_map.get("title")),
+        start=_optional_str(period_map.get("start_date")),
+        end=_optional_str(period_map.get("end_date")),
+    )
+    if not any((info.message, info.title, info.start, info.end)):
+        return None
+    return info
 
 
 class SpGroupClient:
@@ -327,47 +499,77 @@ class SpGroupClient:
                 return self._fetch_usage_with(session)
             raise
 
-    def _fetch_usage_with(self, session: Session) -> UsageReadings:
-        auth_headers = {
+    def _auth_headers(self, session: Session) -> dict[str, str]:
+        return {
             "Authorization": f"Bearer {session.access_token}",
             HEADER_ID_TOKEN: session.id_token,
             "User-Agent": USER_AGENT,
             "Accept": "application/json",
         }
-        me_response = self._transport.request(
+
+    def _jarvis_get(self, session: Session, path: str) -> HttpResponse:
+        return self._transport.request(
             "GET",
-            f"{B2C_HOST}{JARVIS_ME_PATH}",
-            auth_headers,
+            f"{B2C_HOST}{path}",
+            self._auth_headers(session),
             None,
         )
+
+    def _fetch_usage_with(self, session: Session) -> UsageReadings:
+        me_response = self._jarvis_get(session, JARVIS_ME_PATH)
         self._raise_auth_if_denied(me_response, "utility account")
         me_body = _require_mapping(_decode_json(me_response.body), "utility account")
-        premise_id = self._select_premise_id(me_body)
-        charts_response = self._transport.request(
-            "GET",
-            f"{B2C_HOST}{JARVIS_CHARTS_PATH}/{premise_id}",
-            auth_headers,
-            None,
-        )
+        premise = self._select_premise(me_body)
+        info = _parse_premise(premise)
+        charts_response = self._jarvis_get(session, f"{JARVIS_CHARTS_PATH}/{info.id}")
         self._raise_auth_if_denied(charts_response, "charts")
         charts = _require_mapping(_decode_json(charts_response.body), "charts")
-        electricity_kwh, elec_unit, elec_periods = _billed_periods(
-            charts.get("elec"), "elec"
-        )
-        water_m3, water_unit, water_periods = _billed_periods(
-            charts.get("water"), "water"
-        )
-        if elec_unit and elec_unit.lower() not in {"kwh", "kw·h"}:
-            raise UsageError(f"unexpected electricity unit {elec_unit!r}")
+        electricity = _parse_utility(charts.get("elec"), "elec")
+        water = _parse_utility(charts.get("water"), "water")
+        gas = _parse_utility(charts.get("gas"), "gas")
+        if electricity is None and water is None and gas is None:
+            raise UsageError("no billed utilities")
+        meter_reading = self._fetch_meter_reading(session, info.id)
+        ppms_credit, ppms_updated = self._fetch_ppms(session, info)
         return UsageReadings(
-            electricity_kwh=electricity_kwh,
-            water_m3=water_m3,
-            premise_id=premise_id,
-            electricity_unit="kWh",
-            water_unit=_normalize_volume_unit(water_unit),
-            electricity_periods=elec_periods,
-            water_periods=water_periods,
+            premise=info,
+            electricity=electricity,
+            water=water,
+            gas=gas,
+            meter_reading=meter_reading,
+            ppms_credit=ppms_credit,
+            ppms_updated_at=ppms_updated,
         )
+
+    def _fetch_meter_reading(
+        self, session: Session, premise_id: str
+    ) -> MeterReadingInfo | None:
+        response = self._jarvis_get(session, f"{JARVIS_SMRD_PATH}/{premise_id}")
+        if response.status >= 400:
+            return None
+        try:
+            body = _decode_json(response.body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return None
+        return _parse_meter_reading(body)
+
+    def _fetch_ppms(
+        self, session: Session, premise: PremiseInfo
+    ) -> tuple[float | None, str | None]:
+        if not premise.ppms_exists:
+            return None, None
+        response = self._jarvis_get(session, f"{JARVIS_PPMS_PATH}/{premise.id}")
+        if response.status >= 400:
+            return None, None
+        try:
+            body = _decode_json(response.body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return None, None
+        if not isinstance(body, dict):
+            return None, None
+        amount = _optional_float(body.get("amount"))
+        updated = _optional_str(body.get("updated_at"))
+        return amount, updated
 
     def _raise_auth_if_denied(self, response: HttpResponse, label: str) -> None:
         if response.status < 400:
@@ -394,21 +596,21 @@ class SpGroupClient:
             f"{label} HTTP {response.status}" + (f": {extra}" if extra else "")
         )
 
-    def _select_premise_id(self, account: dict[str, object]) -> str:
+    def _select_premise(self, account: dict[str, object]) -> dict[str, object]:
         premises = account.get("premises")
         if not isinstance(premises, list) or not premises:
             raise UsageError("no premises on utility account")
-        active: list[str] = []
-        fallback: list[str] = []
+        active: list[dict[str, object]] = []
+        fallback: list[dict[str, object]] = []
         for raw in premises:
             if not isinstance(raw, dict):
                 continue
             premise_id = raw.get("id")
             if not isinstance(premise_id, str) or not premise_id:
                 continue
-            fallback.append(premise_id)
+            fallback.append(raw)
             if raw.get("active") is True:
-                active.append(premise_id)
+                active.append(raw)
         chosen = active or fallback
         if not chosen:
             raise UsageError("premise id missing")
