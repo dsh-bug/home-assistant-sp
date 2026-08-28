@@ -57,4 +57,57 @@ class SpGroupCoordinator(DataUpdateCoordinator[UsageReadings]):
             if session.refresh_token:
                 data[CONF_REFRESH_TOKEN] = session.refresh_token
             self.hass.config_entries.async_update_entry(self.entry, data=data)
+        self.hass.async_create_task(self.async_import_billed_history())
         return usage
+
+    async def async_import_billed_history(self) -> None:
+        """Write billed period totals into recorder long-term statistics."""
+        usage = self.data
+        if usage is None:
+            return
+        from homeassistant.components.recorder.models.statistics import (
+            StatisticMeanType,
+        )
+        from homeassistant.components.recorder.statistics import async_import_statistics
+        from homeassistant.helpers import entity_registry as er
+
+        from .const import SENSOR_KEY_ELECTRICITY, SENSOR_KEY_WATER, UNIT_KWH, UNIT_M3
+        from .history import cumulative_points
+
+        registry = er.async_get(self.hass)
+        series = (
+            (
+                SENSOR_KEY_ELECTRICITY,
+                usage.electricity_periods,
+                UNIT_KWH,
+                "energy",
+            ),
+            (SENSOR_KEY_WATER, usage.water_periods, UNIT_M3, "volume"),
+        )
+        for key, periods, unit, unit_class in series:
+            entity_id = registry.async_get_entity_id(
+                "sensor", DOMAIN, f"{usage.premise_id}_{key}"
+            )
+            if entity_id is None:
+                continue
+            points = cumulative_points(periods)
+            if not points:
+                continue
+            metadata = {
+                "has_sum": True,
+                "mean_type": StatisticMeanType.NONE,
+                "name": None,
+                "source": "recorder",
+                "statistic_id": entity_id,
+                "unit_class": unit_class,
+                "unit_of_measurement": unit,
+            }
+            stats = [
+                {
+                    "start": point.start,
+                    "state": point.cumulative,
+                    "sum": point.cumulative,
+                }
+                for point in points
+            ]
+            async_import_statistics(self.hass, metadata, stats)

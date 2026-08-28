@@ -12,6 +12,7 @@ import ssl
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Protocol
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -106,6 +107,15 @@ class Session:
         return current >= self.expires_at - TOKEN_EXPIRY_BUFFER_SECONDS
 
 
+SG_TZ = timezone(timedelta(hours=8))
+
+
+@dataclass(frozen=True)
+class PeriodReading:
+    start: datetime
+    amount: float
+
+
 @dataclass(frozen=True)
 class UsageReadings:
     electricity_kwh: float
@@ -113,6 +123,8 @@ class UsageReadings:
     premise_id: str
     electricity_unit: str
     water_unit: str
+    electricity_periods: tuple[PeriodReading, ...]
+    water_periods: tuple[PeriodReading, ...]
 
 
 def _decode_json(body: bytes) -> object:
@@ -189,13 +201,29 @@ def _normalize_volume_unit(unit: str) -> str:
     return unit or "m³"
 
 
-def _sum_billed_current(utility: object, label: str) -> tuple[float, str]:
+def _parse_period_start(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    text = value.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=SG_TZ)
+    return parsed
+
+
+def _billed_periods(
+    utility: object, label: str
+) -> tuple[float, str, tuple[PeriodReading, ...]]:
     model = _require_mapping(utility, label)
     data = model.get("data")
     if not isinstance(data, list) or not data:
         raise UsageError(f"{label} has no billed periods")
     total = 0.0
     unit = ""
+    periods: list[PeriodReading] = []
     for row in data:
         item = _require_mapping(row, f"{label} period")
         raw_unit = item.get("unit")
@@ -204,8 +232,12 @@ def _sum_billed_current(utility: object, label: str) -> tuple[float, str]:
         consumption = item.get("consumption")
         if not isinstance(consumption, dict):
             raise UsageError(f"{label} period missing consumption")
-        total += _float(consumption.get("current"))
-    return total, unit
+        amount = _float(consumption.get("current"))
+        total += amount
+        start = _parse_period_start(item.get("period"))
+        if start is not None:
+            periods.append(PeriodReading(start=start, amount=amount))
+    return total, unit, tuple(periods)
 
 
 class SpGroupClient:
@@ -319,8 +351,12 @@ class SpGroupClient:
         )
         self._raise_auth_if_denied(charts_response, "charts")
         charts = _require_mapping(_decode_json(charts_response.body), "charts")
-        electricity_kwh, elec_unit = _sum_billed_current(charts.get("elec"), "elec")
-        water_m3, water_unit = _sum_billed_current(charts.get("water"), "water")
+        electricity_kwh, elec_unit, elec_periods = _billed_periods(
+            charts.get("elec"), "elec"
+        )
+        water_m3, water_unit, water_periods = _billed_periods(
+            charts.get("water"), "water"
+        )
         if elec_unit and elec_unit.lower() not in {"kwh", "kw·h"}:
             raise UsageError(f"unexpected electricity unit {elec_unit!r}")
         return UsageReadings(
@@ -329,6 +365,8 @@ class SpGroupClient:
             premise_id=premise_id,
             electricity_unit="kWh",
             water_unit=_normalize_volume_unit(water_unit),
+            electricity_periods=elec_periods,
+            water_periods=water_periods,
         )
 
     def _raise_auth_if_denied(self, response: HttpResponse, label: str) -> None:
