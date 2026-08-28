@@ -20,7 +20,13 @@ AUTH0_SCOPE = (
     "user_metadata me me:uportal me:eva me:rbac"
 )
 AUTH0_GRANT_TYPE = "http://auth0.com/oauth/grant-type/password-realm"
+AUTH0_REFRESH_GRANT = "refresh_token"
 AUTH0_REALM = "Username-Password-Authentication"
+TOKEN_EXPIRY_BUFFER_SECONDS = 60
+
+CONF_ACCESS_TOKEN = "access_token"
+CONF_ID_TOKEN = "id_token"
+CONF_REFRESH_TOKEN = "refresh_token"
 
 USER_AGENT = "Infinity/15.10.0 (Android)"
 HEADER_ID_TOKEN = "X-id-token"

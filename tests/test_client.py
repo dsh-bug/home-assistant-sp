@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import json
+import time
 
 import pytest
 
-from custom_components.sp_group.client import AuthError, SpGroupClient
+from custom_components.sp_group.client import AuthError, Session, SpGroupClient
 from custom_components.sp_group.const import (
     AUTH0_AUDIENCE,
     AUTH0_CLIENT_ID,
     AUTH0_GRANT_TYPE,
     AUTH0_REALM,
+    AUTH0_REFRESH_GRANT,
     AUTH0_SCOPE,
     B2C_HOST,
     CONTENT_TYPE_JSON,
@@ -57,6 +59,51 @@ def test_login_sends_auth0_password_realm_body() -> None:
         "grant_type": AUTH0_GRANT_TYPE,
         "realm": AUTH0_REALM,
     }
+
+
+def test_login_scope_includes_me_rbac() -> None:
+    assert "me:rbac" in AUTH0_SCOPE
+    assert "me:uportal" in AUTH0_SCOPE
+
+
+def test_stored_session_skips_password_login() -> None:
+    token_payload = json.loads(load_fixture("oauth_token_success.json"))
+    session = Session(
+        access_token=token_payload["access_token"],
+        id_token=token_payload["id_token"],
+        refresh_token=token_payload["refresh_token"],
+        scope=token_payload["scope"],
+        expires_at=int(time.time()) + 3600,
+    )
+    transport = FixtureTransport()
+    client = SpGroupClient(
+        "user@example.com", "secret", transport=transport, session=session
+    )
+    client.fetch_usage()
+    assert all(not req.url.endswith(OAUTH_TOKEN_PATH) for req in transport.requests)
+
+
+def test_refresh_sends_refresh_token_grant() -> None:
+    token_payload = json.loads(load_fixture("oauth_token_success.json"))
+    transport = FixtureTransport()
+    client = SpGroupClient(
+        "user@example.com",
+        "secret",
+        transport=transport,
+        session=Session(
+            access_token=token_payload["access_token"],
+            id_token=token_payload["id_token"],
+            refresh_token=token_payload["refresh_token"],
+            scope=token_payload["scope"],
+        ),
+    )
+    client.refresh()
+    recorded = transport.requests[0]
+    assert recorded.body is not None
+    body = json.loads(recorded.body.decode("utf-8"))
+    assert body["grant_type"] == AUTH0_REFRESH_GRANT
+    assert body["refresh_token"] == token_payload["refresh_token"]
+    assert body["client_id"] == AUTH0_CLIENT_ID
 
 
 def test_fetch_usage_returns_kwh_and_water_from_charts_fixture() -> None:

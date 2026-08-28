@@ -6,8 +6,10 @@ Contract taken from APK sg.com.singaporepower.spservices 15.10.0
 
 from __future__ import annotations
 
+import base64
 import json
 import ssl
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
@@ -20,6 +22,7 @@ from .const import (
     AUTH0_CLIENT_ID,
     AUTH0_GRANT_TYPE,
     AUTH0_REALM,
+    AUTH0_REFRESH_GRANT,
     AUTH0_SCOPE,
     B2C_HOST,
     CONTENT_TYPE_JSON,
@@ -28,6 +31,7 @@ from .const import (
     JARVIS_CHARTS_PATH,
     JARVIS_ME_PATH,
     OAUTH_TOKEN_PATH,
+    TOKEN_EXPIRY_BUFFER_SECONDS,
     USER_AGENT,
 )
 
@@ -93,6 +97,13 @@ class Session:
     id_token: str
     refresh_token: str | None
     scope: str | None
+    expires_at: int | None = None
+
+    def is_expired(self, now: int | None = None) -> bool:
+        if self.expires_at is None:
+            return False
+        current = int(time.time() if now is None else now)
+        return current >= self.expires_at - TOKEN_EXPIRY_BUFFER_SECONDS
 
 
 @dataclass(frozen=True)
@@ -124,6 +135,51 @@ def _float(value: object) -> float:
     if isinstance(value, str) and value:
         return float(value)
     return 0.0
+
+
+def _jwt_exp(token: str) -> int | None:
+    parts = token.split(".")
+    if len(parts) != 3:
+        return None
+    payload = parts[1] + ("=" * (-len(parts[1]) % 4))
+    try:
+        claims = json.loads(base64.urlsafe_b64decode(payload.encode("ascii")))
+    except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    exp = claims.get("exp") if isinstance(claims, dict) else None
+    try:
+        return int(exp) if exp is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _session_from_oauth(
+    mapping: dict[str, object], fallback_refresh: str | None
+) -> Session:
+    access_token = mapping.get("access_token")
+    id_token = mapping.get("id_token")
+    if not isinstance(access_token, str) or not access_token:
+        raise AuthError("invalid_grant", "access_token missing")
+    if not isinstance(id_token, str) or not id_token:
+        raise AuthError("invalid_grant", "id_token missing")
+    refresh = mapping.get("refresh_token")
+    scope = mapping.get("scope")
+    return Session(
+        access_token=access_token,
+        id_token=id_token,
+        refresh_token=refresh if isinstance(refresh, str) else fallback_refresh,
+        scope=scope if isinstance(scope, str) else None,
+        expires_at=_jwt_exp(access_token),
+    )
+
+
+def _oauth_headers() -> dict[str, str]:
+    return {
+        "Content-Type": CONTENT_TYPE_JSON,
+        "Accept-Language": ACCEPT_LANGUAGE,
+        "User-Agent": USER_AGENT,
+        "Accept": "application/json",
+    }
 
 
 def _normalize_volume_unit(unit: str) -> str:
@@ -158,11 +214,16 @@ class SpGroupClient:
         username: str,
         password: str,
         transport: Transport | None = None,
+        session: Session | None = None,
     ) -> None:
         self._username = username
         self._password = password
         self._transport = transport or UrllibTransport()
-        self._session: Session | None = None
+        self._session = session
+
+    @property
+    def session(self) -> Session | None:
+        return self._session
 
     def login(self) -> Session:
         payload = {
@@ -174,15 +235,42 @@ class SpGroupClient:
             "grant_type": AUTH0_GRANT_TYPE,
             "realm": AUTH0_REALM,
         }
+        mapping = self._oauth_post(payload)
+        session = _session_from_oauth(mapping, None)
+        self._session = session
+        return session
+
+    def refresh(self) -> Session:
+        current = self._session
+        if current is None or not current.refresh_token:
+            raise AuthError("invalid_grant", "refresh_token missing")
+        payload = {
+            "client_id": AUTH0_CLIENT_ID,
+            "refresh_token": current.refresh_token,
+            "scope": AUTH0_SCOPE,
+            "grant_type": AUTH0_REFRESH_GRANT,
+        }
+        mapping = self._oauth_post(payload)
+        session = _session_from_oauth(mapping, current.refresh_token)
+        self._session = session
+        return session
+
+    def ensure_session(self) -> Session:
+        current = self._session
+        if current is not None and not current.is_expired() and current.access_token:
+            return current
+        if current is not None and current.refresh_token:
+            try:
+                return self.refresh()
+            except AuthError:
+                pass
+        return self.login()
+
+    def _oauth_post(self, payload: dict[str, str]) -> dict[str, object]:
         response = self._transport.request(
             "POST",
             f"{IDENTITY_HOST}{OAUTH_TOKEN_PATH}",
-            {
-                "Content-Type": CONTENT_TYPE_JSON,
-                "Accept-Language": ACCEPT_LANGUAGE,
-                "User-Agent": USER_AGENT,
-                "Accept": "application/json",
-            },
+            _oauth_headers(),
             json.dumps(payload).encode("utf-8"),
         )
         body = _decode_json(response.body)
@@ -195,25 +283,19 @@ class SpGroupClient:
                 or "authentication failed"
             )
             raise AuthError(error, description)
-        access_token = mapping.get("access_token")
-        id_token = mapping.get("id_token")
-        if not isinstance(access_token, str) or not access_token:
-            raise AuthError("invalid_grant", "access_token missing")
-        if not isinstance(id_token, str) or not id_token:
-            raise AuthError("invalid_grant", "id_token missing")
-        refresh = mapping.get("refresh_token")
-        scope = mapping.get("scope")
-        session = Session(
-            access_token=access_token,
-            id_token=id_token,
-            refresh_token=refresh if isinstance(refresh, str) else None,
-            scope=scope if isinstance(scope, str) else None,
-        )
-        self._session = session
-        return session
+        return mapping
 
     def fetch_usage(self) -> UsageReadings:
-        session = self._session or self.login()
+        session = self.ensure_session()
+        try:
+            return self._fetch_usage_with(session)
+        except AuthError:
+            if session.refresh_token:
+                session = self.refresh()
+                return self._fetch_usage_with(session)
+            raise
+
+    def _fetch_usage_with(self, session: Session) -> UsageReadings:
         auth_headers = {
             "Authorization": f"Bearer {session.access_token}",
             HEADER_ID_TOKEN: session.id_token,

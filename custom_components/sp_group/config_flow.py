@@ -12,7 +12,12 @@ from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 
 from .client import AuthError, SpGroupClient, UsageError
-from .const import DOMAIN
+from .const import (
+    CONF_ACCESS_TOKEN,
+    CONF_ID_TOKEN,
+    CONF_REFRESH_TOKEN,
+    DOMAIN,
+)
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
@@ -22,9 +27,20 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 )
 
 
-async def _validate(hass: HomeAssistant, username: str, password: str) -> None:
+async def _validate(
+    hass: HomeAssistant, username: str, password: str
+) -> dict[str, str]:
     client = SpGroupClient(username=username, password=password)
-    await hass.async_add_executor_job(client.login)
+    session = await hass.async_add_executor_job(client.login)
+    data = {
+        CONF_USERNAME: username,
+        CONF_PASSWORD: password,
+        CONF_ACCESS_TOKEN: session.access_token,
+        CONF_ID_TOKEN: session.id_token,
+    }
+    if session.refresh_token:
+        data[CONF_REFRESH_TOKEN] = session.refresh_token
+    return data
 
 
 class SpGroupConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -38,7 +54,7 @@ class SpGroupConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             await self.async_set_unique_id(user_input[CONF_USERNAME].lower())
             self._abort_if_unique_id_configured()
             try:
-                await _validate(
+                data = await _validate(
                     self.hass,
                     user_input[CONF_USERNAME],
                     user_input[CONF_PASSWORD],
@@ -52,7 +68,7 @@ class SpGroupConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 return self.async_create_entry(
                     title="SP Group",
-                    data=user_input,
+                    data=data,
                 )
         return self.async_show_form(
             step_id="user",
