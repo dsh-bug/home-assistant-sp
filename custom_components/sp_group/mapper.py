@@ -13,12 +13,14 @@ from .const import (
     DEVICE_CLASS_WATER,
     ENTITY_CATEGORY_DIAGNOSTIC,
     SENSOR_KEY_ACCOUNT,
+    SENSOR_KEY_AMOUNT_DUE,
     SENSOR_KEY_ELECTRICITY,
     SENSOR_KEY_ELECTRICITY_HOUR,
     SENSOR_KEY_ELECTRICITY_LAST,
     SENSOR_KEY_ELECTRICITY_TODAY,
     SENSOR_KEY_GAS,
     SENSOR_KEY_GAS_LAST,
+    SENSOR_KEY_LAST_BILL,
     SENSOR_KEY_PPMS,
     SENSOR_KEY_WATER,
     SENSOR_KEY_WATER_LAST,
@@ -118,6 +120,21 @@ def extra_attributes(usage: UsageReadings, key: str) -> dict[str, object]:
             attrs["meter_reading_title"] = reading.title
             attrs["meter_reading_start"] = reading.start
             attrs["meter_reading_end"] = reading.end
+        return _omit_none(attrs)
+    if key == SENSOR_KEY_LAST_BILL:
+        bill = usage.last_bill
+        if bill is not None:
+            attrs["bill_date"] = bill.date
+            attrs["bill_period"] = bill.period
+            attrs["due_date"] = bill.due_date
+            attrs["bill_account_number"] = bill.account_number
+        return _omit_none(attrs)
+    if key == SENSOR_KEY_AMOUNT_DUE:
+        due = usage.amount_due
+        if due is not None:
+            attrs["currency"] = due.currency
+            attrs["giro_enabled"] = due.giro_enabled
+            attrs["recurring_enabled"] = due.recurring_enabled
         return _omit_none(attrs)
     series: UtilitySeries | None
     if key in {
@@ -275,6 +292,30 @@ def sensors_from_usage(usage: UsageReadings | None) -> list[SensorSpec]:
                 state_class=None,
                 unit_of_measurement=UNIT_SGD,
                 entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+                suggested_display_precision=2,
+            )
+        )
+    if usage.last_bill is not None:
+        specs.append(
+            SensorSpec(
+                key=SENSOR_KEY_LAST_BILL,
+                translation_key=SENSOR_KEY_LAST_BILL,
+                native_value=usage.last_bill.amount_sgd,
+                device_class=DEVICE_CLASS_MONETARY,
+                state_class=None,
+                unit_of_measurement=UNIT_SGD,
+                suggested_display_precision=2,
+            )
+        )
+    if usage.amount_due is not None:
+        specs.append(
+            SensorSpec(
+                key=SENSOR_KEY_AMOUNT_DUE,
+                translation_key=SENSOR_KEY_AMOUNT_DUE,
+                native_value=usage.amount_due.amount_sgd,
+                device_class=DEVICE_CLASS_MONETARY,
+                state_class=None,
+                unit_of_measurement=UNIT_SGD,
                 suggested_display_precision=2,
             )
         )
