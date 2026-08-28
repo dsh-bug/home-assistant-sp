@@ -1,0 +1,103 @@
+"""HTTP fixture transport matching APK 15.10.0 hosts and paths."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from pathlib import Path
+from urllib.parse import urlparse
+
+from custom_components.sp_group.client import HttpResponse
+from custom_components.sp_group.const import (
+    B2C_HOST,
+    IDENTITY_HOST,
+    JARVIS_CHARTS_PATH,
+    JARVIS_ME_PATH,
+    OAUTH_TOKEN_PATH,
+)
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+
+
+def load_fixture(name: str) -> bytes:
+    return (FIXTURES / name).read_bytes()
+
+
+@dataclass
+class RecordedRequest:
+    method: str
+    url: str
+    headers: dict[str, str]
+    body: bytes | None
+
+
+@dataclass
+class FixtureTransport:
+    """Serves recorded Auth0/Jarvis JSON. Does not implement client logic."""
+
+    fail_login: bool = False
+    requests: list[RecordedRequest] = field(default_factory=list)
+
+    def request(
+        self,
+        method: str,
+        url: str,
+        headers: Mapping[str, str],
+        body: bytes | None,
+    ) -> HttpResponse:
+        self.requests.append(
+            RecordedRequest(method=method, url=url, headers=dict(headers), body=body)
+        )
+        parsed = urlparse(url)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+        path = parsed.path
+        if method == "POST" and origin == IDENTITY_HOST and path == OAUTH_TOKEN_PATH:
+            if self.fail_login:
+                return HttpResponse(
+                    status=403,
+                    headers={"Content-Type": "application/json"},
+                    body=load_fixture("oauth_token_invalid_grant.json"),
+                )
+            return HttpResponse(
+                status=200,
+                headers={"Content-Type": "application/json"},
+                body=load_fixture("oauth_token_success.json"),
+            )
+        if method == "GET" and origin == B2C_HOST and path == JARVIS_ME_PATH:
+            return HttpResponse(
+                status=200,
+                headers={"Content-Type": "application/json"},
+                body=load_fixture("jarvis_me.json"),
+            )
+        if (
+            method == "GET"
+            and origin == B2C_HOST
+            and path.startswith(f"{JARVIS_CHARTS_PATH}/")
+        ):
+            return HttpResponse(
+                status=200,
+                headers={"Content-Type": "application/json"},
+                body=load_fixture("jarvis_charts.json"),
+            )
+        return HttpResponse(status=404, headers={}, body=b"{}")
+
+
+def billed_totals_from_charts_payload(
+    payload: dict[str, object],
+) -> tuple[float, float]:
+    """Read consumption.current from the fixture JSON (field names from the APK)."""
+
+    def _sum(section_key: str) -> float:
+        section = payload[section_key]
+        assert isinstance(section, dict)
+        data = section["data"]
+        assert isinstance(data, list)
+        total = 0.0
+        for row in data:
+            assert isinstance(row, dict)
+            consumption = row["consumption"]
+            assert isinstance(consumption, dict)
+            total += float(consumption["current"])
+        return total
+
+    return _sum("elec"), _sum("water")

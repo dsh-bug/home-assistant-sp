@@ -1,0 +1,21 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "SP Group",
+        "description": "Sign in with the same e-account email and password used in the SP app.",
+        "data": {
+          "username": "Email",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid e-account email or password.",
+      "cannot_connect": "Could not reach SP Group."
+    },
+    "abort": {
+      "already_configured": "This SP e-account is already configured."
+    }
+  }
+}

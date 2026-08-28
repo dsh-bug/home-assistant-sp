@@ -1,0 +1,11 @@
+{
+  "domain": "sp_group",
+  "name": "SP Group",
+  "codeowners": [],
+  "config_flow": true,
+  "documentation": "https://github.com/maci/home-assistant-sp",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/maci/home-assistant-sp/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

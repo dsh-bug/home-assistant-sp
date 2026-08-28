@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.scratch/
+*.apk
+*.xapk
+*.dex
+.semcode.db
+dist/
+build/
+.coverage
+htmlcov/

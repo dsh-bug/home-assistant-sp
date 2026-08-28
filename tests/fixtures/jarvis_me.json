@@ -1,0 +1,13 @@
+{
+  "status": "ACTIVE",
+  "bp_numbers": [],
+  "premises": [
+    {
+      "id": "premise-001",
+      "address": "1 Example Road, Singapore",
+      "active": true,
+      "type": "residential",
+      "oem_eligible": false
+    }
+  ]
+}
