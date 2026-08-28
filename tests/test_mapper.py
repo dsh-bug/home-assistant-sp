@@ -46,7 +46,7 @@ def test_sensors_match_energy_dashboard_contract() -> None:
     water = by_key["water"]
     assert water.native_value == expected_m3
     assert water.device_class == DEVICE_CLASS_WATER
-    assert water.state_class == STATE_CLASS_TOTAL_INCREASING
+    assert water.state_class is None
     assert water.unit_of_measurement == UNIT_M3
 
     last_elec = by_key[SENSOR_KEY_ELECTRICITY_LAST]

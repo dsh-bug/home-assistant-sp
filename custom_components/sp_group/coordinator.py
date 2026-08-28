@@ -20,9 +20,7 @@ from .const import (
     DOMAIN,
     SENSOR_KEY_ELECTRICITY,
     SENSOR_KEY_GAS,
-    SENSOR_KEY_WATER,
     UNIT_KWH,
-    UNIT_M3,
     UPDATE_INTERVAL,
 )
 
@@ -91,8 +89,6 @@ class SpGroupCoordinator(DataUpdateCoordinator[UsageReadings]):
                     "energy",
                 )
             )
-        if usage.water is not None:
-            series.append((SENSOR_KEY_WATER, usage.water.periods, UNIT_M3, "volume"))
         if usage.gas is not None:
             series.append(
                 (
