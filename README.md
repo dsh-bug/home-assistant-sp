@@ -20,15 +20,15 @@ Copy `custom_components/sp_group` into `<config>/custom_components/sp_group` and
 
 ## Energy dashboard
 
-After the first successful poll, billed months are imported as long-term statistics.
+After the first successful poll, usage is imported as long-term statistics.
 
 - Grid consumption: `sensor.sp_group_utilities_electricity`
 - Water: `sensor.sp_group_utilities_water` (Water section, not Grid)
 - Gas: `sensor.sp_group_utilities_gas` when the charts payload has billed gas periods
 
-These are billed totals, not live AMI ticks. Usage appears on bill dates and stays flat between bills.
+When the premise has AMI electricity (`ami_elec`), the electricity sensor uses the same AMI series as the SP app: 30-minute slots folded into hours for the last 31 days, plus daily points for about a year. Energy then shows hourly bars instead of one yearly lump. Water stays billed months (no AMI water on typical accounts).
 
-Last billed period sensors (`*_last_billed`) are measurement values for the latest month. Do not add those as Energy grid sources.
+Last billed period sensors (`*_last_billed`) are the latest bill. Do not add those as Energy grid sources. `Electricity today` and `Electricity last hour` are AMI measurements.
 
 ## Entities
 
@@ -52,8 +52,9 @@ Polls about once an hour:
 1. `POST https://identity.spdigital.sg/oauth/token` Auth0 password-realm (scopes include `me me:uportal me:eva me:rbac`)
 2. `GET https://b2c.api.spdigital.sg/jarvis/v3/me` for the premise and account
 3. `GET https://b2c.api.spdigital.sg/jarvis/v4/charts/{premise_id}` for `elec`, `water`, and `gas`
-4. `GET https://b2c.api.spdigital.sg/jarvis/v3/smrd-uportal/{premise_id}` for the next meter-reading window (ignored if it fails)
-5. `GET https://b2c.api.spdigital.sg/jarvis/v3/ppms/balance/{premise_id}` only if `ppms_details.exists` is true
+4. `POST https://b2c.api.spdigital.sg/jarvis/v3/ami/charts` when `ami_elec` is true (`grouped_by` `day` for 30-minute slots, `month` for daily)
+5. `GET https://b2c.api.spdigital.sg/jarvis/v3/smrd-uportal/{premise_id}` for the next meter-reading window (ignored if it fails)
+6. `GET https://b2c.api.spdigital.sg/jarvis/v3/ppms/balance/{premise_id}` only if `ppms_details.exists` is true
 
 The session refresh token is stored on the config entry so Home Assistant restarts do not password-login every time.
 
@@ -65,7 +66,7 @@ Add the cumulative electricity sensor as the Energy dashboard grid source, and t
 
 ## Known limitations
 
-Billed months only. AMI hourly charts, EV charging, GreenUP, bill pay, meter-reading submission, and Singpass login are not included. Town-gas sensors appear only when Jarvis returns billed `gas` periods. Prepaid credit is skipped when the account is not PPMS (the live API returns `no_ppms_account`).
+AMI electricity is 30-minute slots for 31 days and daily points for about 13 months, matching the app's Today / month / year charts. EV charging, GreenUP, bill pay, meter-reading submission, and Singpass login are not included. Town-gas sensors appear only when Jarvis returns billed `gas` periods. Prepaid credit is skipped when the account is not PPMS.
 
 ## Remove
 

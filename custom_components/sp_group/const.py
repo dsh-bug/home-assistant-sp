@@ -13,6 +13,15 @@ JARVIS_ME_PATH = "/jarvis/v3/me"
 JARVIS_CHARTS_PATH = "/jarvis/v4/charts"
 JARVIS_PPMS_PATH = "/jarvis/v3/ppms/balance"
 JARVIS_SMRD_PATH = "/jarvis/v3/smrd-uportal"
+JARVIS_AMI_PATH = "/jarvis/v3/ami/charts"
+
+# SmartMeterChartRequestModel: HOURLY -> grouped_by "day" (30-min slots),
+# DAILY -> grouped_by "month" (one point per day).
+AMI_GROUPED_BY_HALF_HOUR = "day"
+AMI_GROUPED_BY_DAILY = "month"
+AMI_HALF_HOUR_DAYS = 31
+AMI_DAILY_MONTHS = 13
+AMI_DATE_FORMAT = "%Y%m%d%H%M%S"
 
 AUTH0_CLIENT_ID = "z1tl6I1V6HI201ule9tmSALb97hw8Biu"
 AUTH0_AUDIENCE = "https://profile.up.spdigital.sg/"
@@ -36,7 +45,7 @@ HEADER_ID_TOKEN = "X-id-token"
 CONTENT_TYPE_JSON = "application/json; charset=utf-8"
 ACCEPT_LANGUAGE = "en_US"
 
-UPDATE_INTERVAL = timedelta(hours=1)
+UPDATE_INTERVAL = timedelta(minutes=30)
 
 DEVICE_CLASS_ENERGY = "energy"
 DEVICE_CLASS_WATER = "water"
@@ -55,5 +64,7 @@ SENSOR_KEY_GAS = "gas"
 SENSOR_KEY_ELECTRICITY_LAST = "electricity_last_period"
 SENSOR_KEY_WATER_LAST = "water_last_period"
 SENSOR_KEY_GAS_LAST = "gas_last_period"
+SENSOR_KEY_ELECTRICITY_TODAY = "electricity_today"
+SENSOR_KEY_ELECTRICITY_HOUR = "electricity_last_hour"
 SENSOR_KEY_ACCOUNT = "account"
 SENSOR_KEY_PPMS = "ppms_credit"

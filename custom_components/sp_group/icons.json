@@ -4,6 +4,12 @@
       "electricity_last_period": {
         "default": "mdi:flash-outline"
       },
+      "electricity_today": {
+        "default": "mdi:calendar-today"
+      },
+      "electricity_last_hour": {
+        "default": "mdi:clock-outline"
+      },
       "water_last_period": {
         "default": "mdi:water-outline"
       },

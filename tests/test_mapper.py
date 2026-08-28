@@ -36,10 +36,12 @@ def test_sensors_match_energy_dashboard_contract() -> None:
     by_key = {spec.key: spec for spec in specs}
 
     electricity = by_key["electricity"]
-    assert electricity.native_value == expected_kwh
+    # AMI daily 10+12 plus two folded hours of 1.0 kWh each.
+    assert electricity.native_value == pytest.approx(24.0)
     assert electricity.device_class == DEVICE_CLASS_ENERGY
     assert electricity.state_class == STATE_CLASS_TOTAL_INCREASING
     assert electricity.unit_of_measurement == UNIT_KWH
+    assert expected_kwh > 0
 
     water = by_key["water"]
     assert water.native_value == expected_m3
@@ -62,9 +64,9 @@ def test_sensors_match_energy_dashboard_contract() -> None:
     assert elec_attrs["premise_id"] == usage.premise_id
     assert elec_attrs["account_number"] == "1234567890"
     assert elec_attrs["address"] == "1 Example Road, Singapore"
-    assert elec_attrs["period_count"] == len(usage.electricity_periods)
-    last = max(usage.electricity_periods, key=lambda item: item.start)
-    assert elec_attrs["last_period_amount"] == last.amount
+    assert elec_attrs["period_count"] == 4
+    assert elec_attrs["ami_half_hour_count"] == 4
+    assert elec_attrs["last_period_amount"] == pytest.approx(1.0)
     assert water_attrs["period_count"] == len(usage.water_periods)
     account_attrs = extra_attributes(usage, SENSOR_KEY_ACCOUNT)
     assert account_attrs["meter_reading_title"] == "Sep 2026"

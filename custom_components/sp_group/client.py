@@ -20,6 +20,11 @@ from urllib.request import Request, urlopen
 
 from .const import (
     ACCEPT_LANGUAGE,
+    AMI_DAILY_MONTHS,
+    AMI_DATE_FORMAT,
+    AMI_GROUPED_BY_DAILY,
+    AMI_GROUPED_BY_HALF_HOUR,
+    AMI_HALF_HOUR_DAYS,
     AUTH0_AUDIENCE,
     AUTH0_CLIENT_ID,
     AUTH0_GRANT_TYPE,
@@ -30,6 +35,7 @@ from .const import (
     CONTENT_TYPE_JSON,
     HEADER_ID_TOKEN,
     IDENTITY_HOST,
+    JARVIS_AMI_PATH,
     JARVIS_CHARTS_PATH,
     JARVIS_ME_PATH,
     JARVIS_PPMS_PATH,
@@ -161,6 +167,8 @@ class UsageReadings:
     meter_reading: MeterReadingInfo | None = None
     ppms_credit: float | None = None
     ppms_updated_at: str | None = None
+    ami_hourly: tuple[PeriodReading, ...] = ()
+    ami_daily: tuple[PeriodReading, ...] = ()
 
     @property
     def premise_id(self) -> str:
@@ -412,6 +420,34 @@ def _parse_meter_reading(body: object) -> MeterReadingInfo | None:
     return info
 
 
+def _ami_stamp(value: datetime) -> str:
+    return value.astimezone(SG_TZ).strftime(AMI_DATE_FORMAT)
+
+
+def _parse_ami_rows(body: object) -> tuple[PeriodReading, ...]:
+    if not isinstance(body, dict):
+        return ()
+    history = body.get("history")
+    if not isinstance(history, list):
+        return ()
+    periods: list[PeriodReading] = []
+    for block in history:
+        if not isinstance(block, dict):
+            continue
+        rows = block.get("data")
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            start = _parse_period_start(row.get("date"))
+            amount = _optional_float(row.get("consumption"))
+            if start is None or amount is None:
+                continue
+            periods.append(PeriodReading(start=start, amount=amount))
+    return tuple(sorted(periods, key=lambda item: item.start))
+
+
 class SpGroupClient:
     def __init__(
         self,
@@ -515,6 +551,18 @@ class SpGroupClient:
             None,
         )
 
+    def _jarvis_post(
+        self, session: Session, path: str, payload: dict[str, str]
+    ) -> HttpResponse:
+        headers = dict(self._auth_headers(session))
+        headers["Content-Type"] = CONTENT_TYPE_JSON
+        return self._transport.request(
+            "POST",
+            f"{B2C_HOST}{path}",
+            headers,
+            json.dumps(payload).encode("utf-8"),
+        )
+
     def _fetch_usage_with(self, session: Session) -> UsageReadings:
         me_response = self._jarvis_get(session, JARVIS_ME_PATH)
         self._raise_auth_if_denied(me_response, "utility account")
@@ -531,6 +579,7 @@ class SpGroupClient:
             raise UsageError("no billed utilities")
         meter_reading = self._fetch_meter_reading(session, info.id)
         ppms_credit, ppms_updated = self._fetch_ppms(session, info)
+        ami_hourly, ami_daily = self._fetch_ami(session, info)
         return UsageReadings(
             premise=info,
             electricity=electricity,
@@ -539,6 +588,8 @@ class SpGroupClient:
             meter_reading=meter_reading,
             ppms_credit=ppms_credit,
             ppms_updated_at=ppms_updated,
+            ami_hourly=ami_hourly,
+            ami_daily=ami_daily,
         )
 
     def _fetch_meter_reading(
@@ -570,6 +621,56 @@ class SpGroupClient:
         amount = _optional_float(body.get("amount"))
         updated = _optional_str(body.get("updated_at"))
         return amount, updated
+
+    def _fetch_ami(
+        self, session: Session, premise: PremiseInfo
+    ) -> tuple[tuple[PeriodReading, ...], tuple[PeriodReading, ...]]:
+        if premise.ami_elec is not True:
+            return (), ()
+        now = datetime.now(SG_TZ)
+        day_end = now.replace(hour=23, minute=59, second=59, microsecond=0)
+        day_start = (now - timedelta(days=AMI_HALF_HOUR_DAYS - 1)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        month = now.month - (AMI_DAILY_MONTHS - 1)
+        year = now.year
+        while month <= 0:
+            month += 12
+            year -= 1
+        month_start = now.replace(
+            year=year, month=month, day=1, hour=0, minute=0, second=0, microsecond=0
+        )
+        hourly = self._fetch_ami_range(
+            session, premise.id, AMI_GROUPED_BY_HALF_HOUR, day_start, day_end
+        )
+        daily = self._fetch_ami_range(
+            session, premise.id, AMI_GROUPED_BY_DAILY, month_start, day_end
+        )
+        return hourly, daily
+
+    def _fetch_ami_range(
+        self,
+        session: Session,
+        premise_id: str,
+        grouped_by: str,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[PeriodReading, ...]:
+        payload = {
+            "premise_id": premise_id,
+            "start": _ami_stamp(start),
+            "end": _ami_stamp(end),
+            "grouped_by": grouped_by,
+            "utility_type": "electric",
+        }
+        response = self._jarvis_post(session, JARVIS_AMI_PATH, payload)
+        if response.status >= 400:
+            return ()
+        try:
+            body = _decode_json(response.body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return ()
+        return _parse_ami_rows(body)
 
     def _raise_auth_if_denied(self, response: HttpResponse, label: str) -> None:
         if response.status < 400:
