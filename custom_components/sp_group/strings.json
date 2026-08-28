@@ -16,6 +16,14 @@
           "username": "Email",
           "password": "Password"
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigure SP Group",
+        "description": "Update the e-account email and password used to poll SP Group.",
+        "data": {
+          "username": "Email",
+          "password": "Password"
+        }
       }
     },
     "error": {
@@ -25,7 +33,37 @@
     },
     "abort": {
       "already_configured": "This SP e-account is already configured.",
-      "reauth_successful": "Reauthentication succeeded."
+      "reauth_successful": "Reauthentication succeeded.",
+      "reconfigure_successful": "Reconfiguration succeeded.",
+      "unique_id_mismatch": "The email does not match the configured SP e-account."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "electricity": {
+        "name": "Electricity"
+      },
+      "water": {
+        "name": "Water"
+      },
+      "gas": {
+        "name": "Gas"
+      },
+      "electricity_last_period": {
+        "name": "Electricity last billed"
+      },
+      "water_last_period": {
+        "name": "Water last billed"
+      },
+      "gas_last_period": {
+        "name": "Gas last billed"
+      },
+      "account": {
+        "name": "Account"
+      },
+      "ppms_credit": {
+        "name": "Prepaid credit"
+      }
     }
   }
 }

@@ -43,6 +43,14 @@ async def _validate(
     return data
 
 
+def _auth_error_key(exc: AuthError) -> str:
+    return (
+        "requires_verification"
+        if exc.error == "requires_verification"
+        else "invalid_auth"
+    )
+
+
 class SpGroupConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
@@ -60,11 +68,7 @@ class SpGroupConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     user_input[CONF_PASSWORD],
                 )
             except AuthError as exc:
-                errors["base"] = (
-                    "requires_verification"
-                    if exc.error == "requires_verification"
-                    else "invalid_auth"
-                )
+                errors["base"] = _auth_error_key(exc)
             except UsageError:
                 errors["base"] = "cannot_connect"
             except OSError:
@@ -98,14 +102,12 @@ class SpGroupConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     user_input[CONF_PASSWORD],
                 )
             except AuthError as exc:
-                errors["base"] = (
-                    "requires_verification"
-                    if exc.error == "requires_verification"
-                    else "invalid_auth"
-                )
+                errors["base"] = _auth_error_key(exc)
             except (UsageError, OSError):
                 errors["base"] = "cannot_connect"
             else:
+                await self.async_set_unique_id(user_input[CONF_USERNAME].lower())
+                self._abort_if_unique_id_mismatch()
                 return self.async_update_reload_and_abort(
                     reauth_entry, data_updates=data
                 )
@@ -116,6 +118,40 @@ class SpGroupConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Required(
                         CONF_USERNAME,
                         default=reauth_entry.data.get(CONF_USERNAME, ""),
+                    ): str,
+                    vol.Required(CONF_PASSWORD): str,
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        errors: dict[str, str] = {}
+        entry = self._get_reconfigure_entry()
+        if user_input is not None:
+            try:
+                data = await _validate(
+                    self.hass,
+                    user_input[CONF_USERNAME],
+                    user_input[CONF_PASSWORD],
+                )
+            except AuthError as exc:
+                errors["base"] = _auth_error_key(exc)
+            except (UsageError, OSError):
+                errors["base"] = "cannot_connect"
+            else:
+                await self.async_set_unique_id(user_input[CONF_USERNAME].lower())
+                self._abort_if_unique_id_mismatch()
+                return self.async_update_reload_and_abort(entry, data_updates=data)
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_USERNAME,
+                        default=entry.data.get(CONF_USERNAME, ""),
                     ): str,
                     vol.Required(CONF_PASSWORD): str,
                 }

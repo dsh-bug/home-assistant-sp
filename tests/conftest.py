@@ -13,6 +13,8 @@ from custom_components.sp_group.const import (
     IDENTITY_HOST,
     JARVIS_CHARTS_PATH,
     JARVIS_ME_PATH,
+    JARVIS_PPMS_PATH,
+    JARVIS_SMRD_PATH,
     OAUTH_TOKEN_PATH,
 )
 
@@ -36,6 +38,9 @@ class FixtureTransport:
     """Serves recorded Auth0/Jarvis JSON. Does not implement client logic."""
 
     fail_login: bool = False
+    charts_fixture: str = "jarvis_charts.json"
+    me_fixture: str = "jarvis_me.json"
+    smrd_fixture: str | None = "jarvis_smrd.json"
     requests: list[RecordedRequest] = field(default_factory=list)
 
     def request(
@@ -67,7 +72,7 @@ class FixtureTransport:
             return HttpResponse(
                 status=200,
                 headers={"Content-Type": "application/json"},
-                body=load_fixture("jarvis_me.json"),
+                body=load_fixture(self.me_fixture),
             )
         if (
             method == "GET"
@@ -77,7 +82,29 @@ class FixtureTransport:
             return HttpResponse(
                 status=200,
                 headers={"Content-Type": "application/json"},
-                body=load_fixture("jarvis_charts.json"),
+                body=load_fixture(self.charts_fixture),
+            )
+        if (
+            method == "GET"
+            and origin == B2C_HOST
+            and path.startswith(f"{JARVIS_SMRD_PATH}/")
+        ):
+            if self.smrd_fixture is None:
+                return HttpResponse(status=404, headers={}, body=b"{}")
+            return HttpResponse(
+                status=200,
+                headers={"Content-Type": "application/json"},
+                body=load_fixture(self.smrd_fixture),
+            )
+        if (
+            method == "GET"
+            and origin == B2C_HOST
+            and path.startswith(f"{JARVIS_PPMS_PATH}/")
+        ):
+            return HttpResponse(
+                status=401,
+                headers={"Content-Type": "application/json"},
+                body=b'{"error":"no_ppms_account"}',
             )
         return HttpResponse(status=404, headers={}, body=b"{}")
 

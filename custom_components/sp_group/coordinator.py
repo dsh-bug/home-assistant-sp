@@ -12,12 +12,17 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .client import AuthError, SpGroupClient, UsageError, UsageReadings
+from .client import AuthError, SpGroupClient, UsageError, UsageReadings, UtilitySeries
 from .const import (
     CONF_ACCESS_TOKEN,
     CONF_ID_TOKEN,
     CONF_REFRESH_TOKEN,
     DOMAIN,
+    SENSOR_KEY_ELECTRICITY,
+    SENSOR_KEY_GAS,
+    SENSOR_KEY_WATER,
+    UNIT_KWH,
+    UNIT_M3,
     UPDATE_INTERVAL,
 )
 
@@ -70,6 +75,32 @@ class SpGroupCoordinator(DataUpdateCoordinator[UsageReadings]):
         except Exception:
             _LOGGER.exception("failed to import billed statistics")
 
+    def _history_series(
+        self, usage: UsageReadings
+    ) -> list[tuple[str, tuple, str, str]]:
+        series: list[tuple[str, tuple, str, str]] = []
+        if usage.electricity is not None:
+            series.append(
+                (
+                    SENSOR_KEY_ELECTRICITY,
+                    usage.electricity.periods,
+                    UNIT_KWH,
+                    "energy",
+                )
+            )
+        if usage.water is not None:
+            series.append((SENSOR_KEY_WATER, usage.water.periods, UNIT_M3, "volume"))
+        if usage.gas is not None:
+            series.append(
+                (
+                    SENSOR_KEY_GAS,
+                    usage.gas.periods,
+                    usage.gas.unit,
+                    _unit_class(usage.gas),
+                )
+            )
+        return series
+
     async def _async_import_billed_history(self, usage: UsageReadings) -> None:
         from homeassistant.components.recorder.models.statistics import (
             StatisticMeanType,
@@ -77,20 +108,10 @@ class SpGroupCoordinator(DataUpdateCoordinator[UsageReadings]):
         from homeassistant.components.recorder.statistics import async_import_statistics
         from homeassistant.helpers import entity_registry as er
 
-        from .const import SENSOR_KEY_ELECTRICITY, SENSOR_KEY_WATER, UNIT_KWH, UNIT_M3
         from .history import cumulative_points
 
         registry = er.async_get(self.hass)
-        series = (
-            (
-                SENSOR_KEY_ELECTRICITY,
-                usage.electricity_periods,
-                UNIT_KWH,
-                "energy",
-            ),
-            (SENSOR_KEY_WATER, usage.water_periods, UNIT_M3, "volume"),
-        )
-        for key, periods, unit, unit_class in series:
+        for key, periods, unit, unit_class in self._history_series(usage):
             entity_id = registry.async_get_entity_id(
                 "sensor", DOMAIN, f"{usage.premise_id}_{key}"
             )
@@ -117,3 +138,9 @@ class SpGroupCoordinator(DataUpdateCoordinator[UsageReadings]):
                 for point in points
             ]
             async_import_statistics(self.hass, metadata, stats)
+
+
+def _unit_class(series: UtilitySeries) -> str:
+    if series.unit == UNIT_KWH:
+        return "energy"
+    return "volume"

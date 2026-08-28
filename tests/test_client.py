@@ -123,8 +123,9 @@ def test_fetch_usage_returns_kwh_and_water_from_charts_fixture() -> None:
     assert usage.water_unit == "m³"
     assert usage.premise_id == premise_id
 
-    me_req = transport.requests[1]
-    charts_req = transport.requests[2]
+    by_path = {urlparse_path(req.url): req for req in transport.requests}
+    me_req = by_path[JARVIS_ME_PATH]
+    charts_req = by_path[f"{JARVIS_CHARTS_PATH}/{premise_id}"]
     bearer = f"Bearer {token_payload['access_token']}"
     assert me_req.method == "GET"
     assert me_req.url == f"{B2C_HOST}{JARVIS_ME_PATH}"
@@ -134,6 +135,24 @@ def test_fetch_usage_returns_kwh_and_water_from_charts_fixture() -> None:
     assert charts_req.url == f"{B2C_HOST}{JARVIS_CHARTS_PATH}/{premise_id}"
     assert charts_req.headers["Authorization"] == bearer
     assert charts_req.headers[HEADER_ID_TOKEN] == token_payload["id_token"]
+    assert usage.premise.account_number == "1234567890"
+    assert usage.premise.address == "1 Example Road, Singapore"
+    assert usage.premise.ami_elec is True
+    assert usage.premise.ppms_exists is False
+    assert usage.meter_reading is not None
+    assert usage.meter_reading.title == "Sep 2026"
+    assert usage.ppms_credit is None
+    assert usage.gas is None
+    smrd_paths = [
+        urlparse_path(req.url)
+        for req in transport.requests
+        if urlparse_path(req.url).startswith("/jarvis/v3/smrd-uportal/")
+    ]
+    assert smrd_paths == [f"/jarvis/v3/smrd-uportal/{premise_id}"]
+    assert all(
+        not urlparse_path(req.url).startswith("/jarvis/v3/ppms/balance/")
+        for req in transport.requests
+    )
 
 
 def test_me_forbidden_uses_server_error_description() -> None:
@@ -182,6 +201,28 @@ def test_invalid_credentials_raise_auth_error() -> None:
         not urlparse_path(req.url).startswith(JARVIS_CHARTS_PATH)
         for req in transport.requests
     )
+
+
+def test_empty_gas_does_not_fail_fetch() -> None:
+    client = SpGroupClient("user@example.com", "secret", transport=FixtureTransport())
+    usage = client.fetch_usage()
+    assert usage.gas is None
+    assert usage.electricity is not None
+    assert usage.water is not None
+
+
+def test_gas_only_charts_return_gas_series() -> None:
+    client = SpGroupClient(
+        "user@example.com",
+        "secret",
+        transport=FixtureTransport(charts_fixture="jarvis_charts_gas.json"),
+    )
+    usage = client.fetch_usage()
+    assert usage.electricity is None
+    assert usage.water is None
+    assert usage.gas is not None
+    assert usage.gas.total == pytest.approx(17.7)
+    assert usage.gas.unit == "kWh"
 
 
 def urlparse_path(url: str) -> str:
