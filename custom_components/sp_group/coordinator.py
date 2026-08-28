@@ -65,6 +65,12 @@ class SpGroupCoordinator(DataUpdateCoordinator[UsageReadings]):
         usage = self.data
         if usage is None:
             return
+        try:
+            await self._async_import_billed_history(usage)
+        except Exception:
+            _LOGGER.exception("failed to import billed statistics")
+
+    async def _async_import_billed_history(self, usage: UsageReadings) -> None:
         from homeassistant.components.recorder.models.statistics import (
             StatisticMeanType,
         )

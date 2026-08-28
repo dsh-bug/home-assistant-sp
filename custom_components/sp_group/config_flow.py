@@ -59,8 +59,12 @@ class SpGroupConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     user_input[CONF_USERNAME],
                     user_input[CONF_PASSWORD],
                 )
-            except AuthError:
-                errors["base"] = "invalid_auth"
+            except AuthError as exc:
+                errors["base"] = (
+                    "requires_verification"
+                    if exc.error == "requires_verification"
+                    else "invalid_auth"
+                )
             except UsageError:
                 errors["base"] = "cannot_connect"
             except OSError:
@@ -73,5 +77,48 @@ class SpGroupConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user",
             data_schema=STEP_USER_DATA_SCHEMA,
+            errors=errors,
+        )
+
+    async def async_step_reauth(
+        self, entry_data: dict[str, Any]
+    ) -> config_entries.ConfigFlowResult:
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        errors: dict[str, str] = {}
+        reauth_entry = self._get_reauth_entry()
+        if user_input is not None:
+            try:
+                data = await _validate(
+                    self.hass,
+                    user_input[CONF_USERNAME],
+                    user_input[CONF_PASSWORD],
+                )
+            except AuthError as exc:
+                errors["base"] = (
+                    "requires_verification"
+                    if exc.error == "requires_verification"
+                    else "invalid_auth"
+                )
+            except (UsageError, OSError):
+                errors["base"] = "cannot_connect"
+            else:
+                return self.async_update_reload_and_abort(
+                    reauth_entry, data_updates=data
+                )
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_USERNAME,
+                        default=reauth_entry.data.get(CONF_USERNAME, ""),
+                    ): str,
+                    vol.Required(CONF_PASSWORD): str,
+                }
+            ),
             errors=errors,
         )

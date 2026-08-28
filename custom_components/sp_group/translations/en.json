@@ -8,14 +8,24 @@
           "username": "Email",
           "password": "Password"
         }
+      },
+      "reauth_confirm": {
+        "title": "Reauthenticate SP Group",
+        "description": "The stored session expired. Sign in again with your SP e-account.",
+        "data": {
+          "username": "Email",
+          "password": "Password"
+        }
       }
     },
     "error": {
       "invalid_auth": "Invalid e-account email or password.",
-      "cannot_connect": "Could not reach SP Group."
+      "cannot_connect": "Could not reach SP Group.",
+      "requires_verification": "SP flagged this login as suspicious. Sign in once in the SP app, wait a few minutes, then try again."
     },
     "abort": {
-      "already_configured": "This SP e-account is already configured."
+      "already_configured": "This SP e-account is already configured.",
+      "reauth_successful": "Reauthentication succeeded."
     }
   }
 }

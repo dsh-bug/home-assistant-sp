@@ -26,6 +26,23 @@ class SensorSpec:
     unit_of_measurement: str
 
 
+def extra_attributes(usage: UsageReadings, key: str) -> dict[str, object]:
+    """Premise and last billed period for the Energy sensor."""
+    attrs: dict[str, object] = {"premise_id": usage.premise_id}
+    periods = (
+        usage.electricity_periods
+        if key == SENSOR_KEY_ELECTRICITY
+        else usage.water_periods
+    )
+    if not periods:
+        return attrs
+    last = max(periods, key=lambda item: item.start)
+    attrs["last_period"] = last.start.isoformat()
+    attrs["last_period_amount"] = last.amount
+    attrs["period_count"] = len(periods)
+    return attrs
+
+
 def sensors_from_usage(usage: UsageReadings | None) -> list[SensorSpec]:
     """Return energy/water sensors, or none if login/usage failed."""
     if usage is None:

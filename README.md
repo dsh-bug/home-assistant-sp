@@ -1,21 +1,53 @@
 # SP Group for Home Assistant
 
-Unofficial custom integration that pulls billed electricity (kWh) and water (m³) from an SP e-account into Home Assistant Energy dashboard sensors.
+Unofficial custom integration for Singapore Power e-accounts. It exposes billed electricity (kWh) and water (m³) as Energy-dashboard sensors.
 
-Auth and usage HTTP contracts come from the current SP Android app (`sg.com.singaporepower.spservices` 15.10.0), not the 2018 `jarvis-api` blog.
+Auth and usage HTTP contracts come from SP Android app `sg.com.singaporepower.spservices` 15.10.0.
 
 ## Install
 
-Copy `custom_components/sp_group` into your Home Assistant `custom_components/` directory and restart. Add **SP Group** from Settings → Devices & Services. Sign in with the same e-account email and password as the SP app.
+### HACS (custom repository)
 
-Sensors:
+1. HACS → Integrations → Custom repositories
+2. URL: `https://github.com/maci0/home-assistant-sp`, category Integration
+3. Download **SP Group**, then restart Home Assistant
+4. Settings → Devices & services → Add integration → **SP Group**
+5. Sign in with the same e-account email and password as the SP app
 
-- `sensor.electricity` — `device_class=energy`, `state_class=total_increasing`, `kWh`
-- `sensor.water` — `device_class=water`, `state_class=total_increasing`, `m³`
+### Manual
 
-Values are the sum of billed period `consumption.current` from `GET /jarvis/v4/charts/{premise_id}`. That sum only grows when a new bill lands.
+Copy `custom_components/sp_group` into `<config>/custom_components/sp_group` and restart.
 
-## Client without Home Assistant
+## Energy dashboard
+
+After the first successful poll, billed months are imported as long-term statistics.
+
+- Grid consumption: `sensor.sp_group_utilities_electricity`
+- Water: `sensor.sp_group_utilities_water` (Water section, not Grid)
+
+These are billed totals, not live AMI ticks. Usage appears on bill dates and stays flat between bills.
+
+Each sensor also has `premise_id`, `last_period`, `last_period_amount`, and `period_count`.
+
+## What it does
+
+1. `POST https://identity.spdigital.sg/oauth/token` Auth0 password-realm (scopes include `me me:uportal me:eva me:rbac`)
+2. `GET https://b2c.api.spdigital.sg/jarvis/v3/me` for the premise
+3. `GET https://b2c.api.spdigital.sg/jarvis/v4/charts/{premise_id}` for `elec` and `water`
+
+The session refresh token is stored on the config entry so Home Assistant restarts do not password-login every time.
+
+## Not included
+
+EV charging, GreenUP, bill pay, meter-reading submission, gas, Singpass-only login.
+
+## Troubleshooting
+
+- **invalid_claim / rejected session token:** the client must request the `me:*` scopes. Use this repo, not a stale copy.
+- **Suspicious request requires verification:** Auth0 bot detection after many password logins. Sign in once in the SP app, wait a few minutes, then reload or reauthenticate the integration.
+- **No Energy statistics:** wait for the first poll, hard-refresh the Energy settings page, then pick the sensors above.
+
+## Development
 
 ```
 uv sync --extra dev
@@ -23,14 +55,4 @@ uv run pytest
 uv run python scripts/launch_client.py
 ```
 
-Live login (optional): set `SP_USERNAME` and `SP_PASSWORD`.
-
-## API (from APK 15.10.0)
-
-1. `POST https://identity.spdigital.sg/oauth/token` Auth0 password-realm with scopes `me me:uportal me:eva me:rbac` (plus openid/email/profile). Session is `access_token` plus `id_token`. Without the `me:*` scopes, Jarvis returns 403 `invalid_claim`.
-2. `GET https://b2c.api.spdigital.sg/jarvis/v3/me` with `Authorization: Bearer` and `X-id-token`.
-3. `GET https://b2c.api.spdigital.sg/jarvis/v4/charts/{premise_id}` for `elec` and `water`.
-
-Password login is still in the app. Singpass is not implemented here. EV charging, GreenUP, and bill pay are out of scope.
-
-SSL pinning and Play Integrity in the APK are not reproduced. A non-app client may be rejected by production; parse and HA mapping still run against fixtures.
+Optional live call: `SP_USERNAME` and `SP_PASSWORD`.

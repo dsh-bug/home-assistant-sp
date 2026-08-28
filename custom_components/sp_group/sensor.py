@@ -13,12 +13,13 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfEnergy, UnitOfVolume
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, SENSOR_KEY_ELECTRICITY, SENSOR_KEY_WATER
 from .coordinator import SpGroupCoordinator
-from .mapper import sensors_from_usage
+from .mapper import extra_attributes, sensors_from_usage
 
 _DEVICE_CLASS = {
     "energy": SensorDeviceClass.ENERGY,
@@ -79,11 +80,12 @@ class SpGroupSensor(CoordinatorEntity[SpGroupCoordinator], SensorEntity):
         )
         premise = coordinator.data.premise_id if coordinator.data else "unknown"
         self._attr_unique_id = f"{premise}_{key}"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, premise)},
-            "name": "SP Group utilities",
-            "manufacturer": "SP Group",
-        }
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, premise)},
+            name="SP Group utilities",
+            manufacturer="SP Group",
+            model="e-account",
+        )
 
     @property
     def native_value(self) -> float | None:
@@ -95,3 +97,10 @@ class SpGroupSensor(CoordinatorEntity[SpGroupCoordinator], SensorEntity):
         if self._key == SENSOR_KEY_WATER:
             return usage.water_m3
         return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        usage = self.coordinator.data
+        if usage is None:
+            return {}
+        return extra_attributes(usage, self._key)
