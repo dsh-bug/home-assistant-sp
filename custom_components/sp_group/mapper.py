@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from .client import SG_TZ, PeriodReading, UsageReadings, UtilitySeries
 from .const import (
@@ -28,7 +28,7 @@ from .const import (
     UNIT_M3,
     UNIT_SGD,
 )
-from .history import fold_half_hours, merge_ami_periods
+from .history import fold_half_hours, merge_ami_periods, trim_unreported
 
 
 @dataclass(frozen=True)
@@ -63,8 +63,12 @@ def _series_device_class(series: UtilitySeries, kind: str) -> str:
     return DEVICE_CLASS_GAS
 
 
+def reported_ami_slots(usage: UsageReadings) -> tuple[PeriodReading, ...]:
+    return trim_unreported(usage.ami_hourly)
+
+
 def electricity_graph_periods(usage: UsageReadings) -> tuple[PeriodReading, ...]:
-    hourly = fold_half_hours(usage.ami_hourly)
+    hourly = fold_half_hours(reported_ami_slots(usage))
     merged = merge_ami_periods(usage.ami_daily, hourly)
     if merged:
         return merged
@@ -72,28 +76,25 @@ def electricity_graph_periods(usage: UsageReadings) -> tuple[PeriodReading, ...]
 
 
 def _today_kwh(usage: UsageReadings) -> float | None:
-    hourly = fold_half_hours(usage.ami_hourly)
-    if not hourly:
+    slots = reported_ami_slots(usage)
+    if not slots:
         return None
     today = datetime.now(SG_TZ).date()
     return sum(
-        item.amount for item in hourly if item.start.astimezone(SG_TZ).date() == today
+        item.amount for item in slots if item.start.astimezone(SG_TZ).date() == today
     )
 
 
+def _last_interval(usage: UsageReadings) -> PeriodReading | None:
+    slots = reported_ami_slots(usage)
+    if not slots:
+        return None
+    return max(slots, key=lambda item: item.start)
+
+
 def _last_hour_kwh(usage: UsageReadings) -> float | None:
-    hourly = fold_half_hours(usage.ami_hourly)
-    if not hourly:
-        return None
-    now = datetime.now(SG_TZ)
-    complete = [
-        item
-        for item in hourly
-        if item.start.astimezone(SG_TZ) + timedelta(hours=1) <= now
-    ]
-    if not complete:
-        return None
-    return max(complete, key=lambda item: item.start).amount
+    last = _last_interval(usage)
+    return last.amount if last is not None else None
 
 
 def extra_attributes(usage: UsageReadings, key: str) -> dict[str, object]:
@@ -139,6 +140,10 @@ def extra_attributes(usage: UsageReadings, key: str) -> dict[str, object]:
                 today = _today_kwh(usage)
                 if today is not None:
                     attrs["today_kwh"] = today
+                last_slot = _last_interval(usage)
+                if last_slot is not None:
+                    attrs["last_interval"] = last_slot.start.isoformat()
+                    attrs["last_interval_kwh"] = last_slot.amount
                 return _omit_none(attrs)
     elif key in {SENSOR_KEY_WATER, SENSOR_KEY_WATER_LAST}:
         series = usage.water

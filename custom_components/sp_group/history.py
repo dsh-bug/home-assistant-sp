@@ -30,6 +30,20 @@ def cumulative_points(
     return points
 
 
+def trim_unreported(
+    periods: tuple[PeriodReading, ...] | list[PeriodReading],
+) -> tuple[PeriodReading, ...]:
+    """Drop trailing zero slots the AMI feed has not filled yet."""
+    ordered = sorted(periods, key=lambda item: item.start)
+    last_idx = -1
+    for index, item in enumerate(ordered):
+        if item.amount:
+            last_idx = index
+    if last_idx < 0:
+        return ()
+    return tuple(ordered[: last_idx + 1])
+
+
 def fold_half_hours(
     periods: tuple[PeriodReading, ...] | list[PeriodReading],
 ) -> tuple[PeriodReading, ...]:
