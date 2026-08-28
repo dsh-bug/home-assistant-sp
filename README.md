@@ -27,7 +27,7 @@ Live login (optional): set `SP_USERNAME` and `SP_PASSWORD`.
 
 ## API (from APK 15.10.0)
 
-1. `POST https://identity.spdigital.sg/oauth/token` Auth0 password-realm. Session is `access_token` plus `id_token`.
+1. `POST https://identity.spdigital.sg/oauth/token` Auth0 password-realm with scopes `me me:uportal me:eva me:rbac` (plus openid/email/profile). Session is `access_token` plus `id_token`. Without the `me:*` scopes, Jarvis returns 403 `invalid_claim`.
 2. `GET https://b2c.api.spdigital.sg/jarvis/v3/me` with `Authorization: Bearer` and `X-id-token`.
 3. `GET https://b2c.api.spdigital.sg/jarvis/v4/charts/{premise_id}` for `elec` and `water`.
 

@@ -13,7 +13,12 @@ JARVIS_CHARTS_PATH = "/jarvis/v4/charts"
 
 AUTH0_CLIENT_ID = "z1tl6I1V6HI201ule9tmSALb97hw8Biu"
 AUTH0_AUDIENCE = "https://profile.up.spdigital.sg/"
-AUTH0_SCOPE = "openid profile email user_metadata offline_access"
+# Mh.a.h() joins these for Auth0Api.login. Missing me:* scopes yields
+# MuleSoft 403 invalid_claim on /jarvis/v3/me.
+AUTH0_SCOPE = (
+    "openid email profile offline_access enroll read:authenticators "
+    "user_metadata me me:uportal me:eva me:rbac"
+)
 AUTH0_GRANT_TYPE = "http://auth0.com/oauth/grant-type/password-realm"
 AUTH0_REALM = "Username-Password-Authentication"
 

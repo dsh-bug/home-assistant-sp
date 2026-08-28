@@ -89,6 +89,37 @@ def test_fetch_usage_returns_kwh_and_water_from_charts_fixture() -> None:
     assert charts_req.headers[HEADER_ID_TOKEN] == token_payload["id_token"]
 
 
+def test_me_forbidden_uses_server_error_description() -> None:
+    class ForbiddenMeTransport(FixtureTransport):
+        def request(
+            self,
+            method: str,
+            url: str,
+            headers: dict[str, str],
+            body: bytes | None,
+        ):
+            from urllib.parse import urlparse
+
+            from custom_components.sp_group.client import HttpResponse
+
+            parsed = urlparse(url)
+            if method == "GET" and parsed.path == JARVIS_ME_PATH:
+                return HttpResponse(
+                    403,
+                    {"Content-Type": "application/json"},
+                    b'{"error":"invalid_claim","error_description":"claim error"}',
+                )
+            return super().request(method, url, headers, body)
+
+    client = SpGroupClient(
+        "user@example.com", "secret", transport=ForbiddenMeTransport()
+    )
+    with pytest.raises(AuthError) as exc_info:
+        client.fetch_usage()
+    assert exc_info.value.error == "invalid_claim"
+    assert "claim error" in exc_info.value.error_description
+
+
 def test_invalid_credentials_raise_auth_error() -> None:
     fail_payload = json.loads(load_fixture("oauth_token_invalid_grant.json"))
     transport = FixtureTransport(fail_login=True)

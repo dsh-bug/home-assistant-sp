@@ -250,10 +250,29 @@ class SpGroupClient:
         )
 
     def _raise_auth_if_denied(self, response: HttpResponse, label: str) -> None:
+        if response.status < 400:
+            return
+        mapping: dict[str, object] = {}
+        try:
+            decoded = _decode_json(response.body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            decoded = {}
+        if isinstance(decoded, dict):
+            mapping = decoded
+        extra = str(
+            mapping.get("error_description")
+            or mapping.get("error")
+            or mapping.get("message")
+            or ""
+        )
         if response.status in {401, 403}:
-            raise AuthError("unauthorized", f"{label} rejected session token")
-        if response.status >= 400:
-            raise UsageError(f"{label} HTTP {response.status}")
+            raise AuthError(
+                str(mapping.get("error") or "unauthorized"),
+                extra or f"{label} HTTP {response.status}",
+            )
+        raise UsageError(
+            f"{label} HTTP {response.status}" + (f": {extra}" if extra else "")
+        )
 
     def _select_premise_id(self, account: dict[str, object]) -> str:
         premises = account.get("premises")
