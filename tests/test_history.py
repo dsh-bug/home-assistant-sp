@@ -12,6 +12,7 @@ from custom_components.sp_group.history import (
     cumulative_points,
     fold_half_hours,
     merge_ami_periods,
+    trim_unreported,
 )
 from custom_components.sp_group.mapper import electricity_graph_periods
 
@@ -42,6 +43,20 @@ def test_same_hour_periods_collapse() -> None:
     assert len(points) == 1
     assert points[0].cumulative == 12.5
     assert points[0].start.minute == 0
+
+
+def test_trim_unreported_drops_trailing_zeros() -> None:
+    start = datetime(2026, 8, 28, 15, 0, tzinfo=SG_TZ)
+    trimmed = trim_unreported(
+        (
+            PeriodReading(start=start, amount=0.4),
+            PeriodReading(start=start.replace(minute=30), amount=0.7),
+            PeriodReading(start=start.replace(hour=16), amount=0.0),
+            PeriodReading(start=start.replace(hour=16, minute=30), amount=0.0),
+        )
+    )
+    assert len(trimmed) == 2
+    assert trimmed[-1].amount == pytest.approx(0.7)
 
 
 def test_fold_half_hours_sums_clock_hour() -> None:

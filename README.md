@@ -26,9 +26,9 @@ After the first successful poll, usage is imported as long-term statistics.
 - Water: `sensor.sp_group_utilities_water` (Water section, not Grid)
 - Gas: `sensor.sp_group_utilities_gas` when the charts payload has billed gas periods
 
-When the premise has AMI electricity (`ami_elec`), the electricity sensor uses the same AMI series as the SP app: 30-minute slots folded into hours for the last 31 days, plus daily points for about a year. Energy then shows hourly bars instead of one yearly lump. Water stays billed months (no AMI water on typical accounts).
+When the premise has AMI electricity (`ami_elec`), the electricity sensor uses the same AMI series as the SP app: 30-minute slots for the last 31 days, plus daily points for about a year. The feed lags a few hours; empty slots after the last reported interval are dropped. Energy folds two slots into each clock hour because Home Assistant energy statistics are hourly. Water stays billed months (no AMI water on typical accounts).
 
-Last billed period sensors (`*_last_billed`) are the latest bill. Do not add those as Energy grid sources. `Electricity today` and `Electricity last hour` are AMI measurements.
+Last billed period sensors (`*_last_billed`) are the latest bill. Do not add those as Energy grid sources. `Electricity today` and `Electricity last 30 min` are AMI measurements. The 30-minute sensor is the last slot SP has published, not the clock hour.
 
 ## Entities
 
