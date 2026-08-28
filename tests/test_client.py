@@ -22,6 +22,8 @@ from custom_components.sp_group.const import (
     JARVIS_AMI_PATH,
     JARVIS_CHARTS_PATH,
     JARVIS_ME_PATH,
+    NJORD_HISTORY_PATH,
+    NJORD_PAYABLES_PATH,
     OAUTH_TOKEN_PATH,
     USER_AGENT,
 )
@@ -172,6 +174,21 @@ def test_fetch_usage_returns_kwh_and_water_from_charts_fixture() -> None:
     assert len(usage.ami_hourly) == 4
     assert len(usage.ami_daily) == 2
     assert usage.ami_hourly[0].amount == pytest.approx(0.4)
+    assert usage.last_bill is not None
+    assert usage.last_bill.amount_sgd == pytest.approx(203.69)
+    assert usage.last_bill.period == "2026-07-31T16:00:00Z"
+    assert usage.amount_due is not None
+    assert usage.amount_due.amount_sgd == pytest.approx(203.69)
+    assert any(
+        urlparse_path(req.url) == NJORD_PAYABLES_PATH for req in transport.requests
+    )
+    history_reqs = [
+        req
+        for req in transport.requests
+        if urlparse_path(req.url) == NJORD_HISTORY_PATH
+    ]
+    assert len(history_reqs) == 1
+    assert "account_numbers=1234567890" in history_reqs[0].url
 
 
 def test_me_forbidden_uses_server_error_description() -> None:
@@ -242,6 +259,32 @@ def test_gas_only_charts_return_gas_series() -> None:
     assert usage.gas is not None
     assert usage.gas.total == pytest.approx(17.7)
     assert usage.gas.unit == "kWh"
+
+
+def test_amount_due_credit_is_negative_sgd() -> None:
+    class CreditTransport(FixtureTransport):
+        def request(self, method, url, headers, body):
+            from urllib.parse import urlparse
+
+            from custom_components.sp_group.client import HttpResponse
+
+            parsed = urlparse(url)
+            if method == "GET" and parsed.path == NJORD_PAYABLES_PATH:
+                return HttpResponse(
+                    200,
+                    {"Content-Type": "application/json"},
+                    b'{"payables":[{"account_number":"1234567890","currency":"SGD",'
+                    b'"amount":-29631,"premises_id":"premise-001","system":"EBS",'
+                    b'"recurring_enabled":false,"giro_enabled":false,'
+                    b'"is_owner":true}]}',
+                )
+            return super().request(method, url, headers, body)
+
+    usage = SpGroupClient(
+        "user@example.com", "secret", transport=CreditTransport()
+    ).fetch_usage()
+    assert usage.amount_due is not None
+    assert usage.amount_due.amount_sgd == pytest.approx(-296.31)
 
 
 def urlparse_path(url: str) -> str:

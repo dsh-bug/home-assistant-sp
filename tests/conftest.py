@@ -16,6 +16,8 @@ from custom_components.sp_group.const import (
     JARVIS_ME_PATH,
     JARVIS_PPMS_PATH,
     JARVIS_SMRD_PATH,
+    NJORD_HISTORY_PATH,
+    NJORD_PAYABLES_PATH,
     OAUTH_TOKEN_PATH,
 )
 
@@ -121,6 +123,18 @@ class FixtureTransport:
                 status=401,
                 headers={"Content-Type": "application/json"},
                 body=b'{"error":"no_ppms_account"}',
+            )
+        if method == "GET" and origin == B2C_HOST and path == NJORD_PAYABLES_PATH:
+            return HttpResponse(
+                status=200,
+                headers={"Content-Type": "application/json"},
+                body=load_fixture("njord_payables.json"),
+            )
+        if method == "GET" and origin == B2C_HOST and path == NJORD_HISTORY_PATH:
+            return HttpResponse(
+                status=200,
+                headers={"Content-Type": "application/json"},
+                body=load_fixture("njord_history.json"),
             )
         return HttpResponse(status=404, headers={}, body=b"{}")
 

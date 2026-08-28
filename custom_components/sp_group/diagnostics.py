@@ -41,4 +41,6 @@ async def async_get_config_entry_diagnostics(
         "water_periods": len(usage.water_periods),
         "gas_periods": len(usage.gas_periods),
         "has_meter_reading": usage.meter_reading is not None,
+        "has_last_bill": usage.last_bill is not None,
+        "has_amount_due": usage.amount_due is not None,
     }

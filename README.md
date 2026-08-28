@@ -40,6 +40,8 @@ Last billed period sensors (`*_last_billed`) are the latest bill. Do not add tho
 | Electricity / water / gas last billed | Latest billed period amount (`measurement`) |
 | Account | Account status, diagnostic. Attributes include address, account number, utilities, AMI flag, retailer, next meter-reading window |
 | Prepaid credit | PPMS balance in SGD, only when `/me` says a prepaid account exists |
+| Last bill | Latest utility bill in SGD from Njord history |
+| Amount due | Outstanding payable in SGD. Negative is a credit |
 
 Shared attributes on usage sensors: `premise_id`, `address`, `account_number`, `last_period`, `last_period_amount`, `period_count`, `average_consumption`, `comparison`.
 
@@ -55,6 +57,8 @@ Polls about once an hour:
 4. `POST https://b2c.api.spdigital.sg/jarvis/v3/ami/charts` when `ami_elec` is true (`grouped_by` `day` for 30-minute slots, `month` for daily)
 5. `GET https://b2c.api.spdigital.sg/jarvis/v3/smrd-uportal/{premise_id}` for the next meter-reading window (ignored if it fails)
 6. `GET https://b2c.api.spdigital.sg/jarvis/v3/ppms/balance/{premise_id}` only if `ppms_details.exists` is true
+7. `GET https://b2c.api.spdigital.sg/njord/v4/payables` for the amount due (Njord stores dollars as integer cents)
+8. `GET https://b2c.api.spdigital.sg/njord/v3/history?account_numbers={account}` for the latest `type=bill` row. PDF download URLs are not stored.
 
 The session refresh token is stored on the config entry so Home Assistant restarts do not password-login every time.
 
@@ -66,7 +70,7 @@ Add the cumulative electricity sensor as the Energy dashboard grid source. Leave
 
 ## Known limitations
 
-AMI electricity is 30-minute slots for 31 days and daily points for about 13 months, matching the app's Today / month / year charts. EV charging, GreenUP, bill pay, meter-reading submission, and Singpass login are not included. Town-gas sensors appear only when Jarvis returns billed `gas` periods. Prepaid credit is skipped when the account is not PPMS.
+AMI electricity is 30-minute slots for 31 days and daily points for about 13 months, matching the app's Today / month / year charts. Last bill and amount due are the same Njord dollar figures the app shows. EV charging, GreenUP, bill pay mutations, meter-reading submission, and Singpass login are not included. Town-gas sensors appear only when Jarvis returns billed `gas` periods. Prepaid credit is skipped when the account is not PPMS.
 
 ## Remove
 

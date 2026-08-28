@@ -14,6 +14,8 @@ JARVIS_CHARTS_PATH = "/jarvis/v4/charts"
 JARVIS_PPMS_PATH = "/jarvis/v3/ppms/balance"
 JARVIS_SMRD_PATH = "/jarvis/v3/smrd-uportal"
 JARVIS_AMI_PATH = "/jarvis/v3/ami/charts"
+NJORD_PAYABLES_PATH = "/njord/v4/payables"
+NJORD_HISTORY_PATH = "/njord/v3/history"
 
 # SmartMeterChartRequestModel: HOURLY -> grouped_by "day" (30-min slots),
 # DAILY -> grouped_by "month" (one point per day).
@@ -68,3 +70,5 @@ SENSOR_KEY_ELECTRICITY_TODAY = "electricity_today"
 SENSOR_KEY_ELECTRICITY_HOUR = "electricity_last_hour"
 SENSOR_KEY_ACCOUNT = "account"
 SENSOR_KEY_PPMS = "ppms_credit"
+SENSOR_KEY_LAST_BILL = "last_bill"
+SENSOR_KEY_AMOUNT_DUE = "amount_due"

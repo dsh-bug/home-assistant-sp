@@ -69,6 +69,12 @@
       },
       "ppms_credit": {
         "name": "Prepaid credit"
+      },
+      "last_bill": {
+        "name": "Last bill"
+      },
+      "amount_due": {
+        "name": "Amount due"
       }
     }
   }

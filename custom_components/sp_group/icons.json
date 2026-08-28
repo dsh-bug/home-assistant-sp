@@ -21,6 +21,12 @@
       },
       "ppms_credit": {
         "default": "mdi:cash"
+      },
+      "last_bill": {
+        "default": "mdi:receipt-text-outline"
+      },
+      "amount_due": {
+        "default": "mdi:cash-clock"
       }
     }
   }

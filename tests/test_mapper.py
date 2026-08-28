@@ -9,18 +9,22 @@ import pytest
 from custom_components.sp_group.client import AuthError, SpGroupClient
 from custom_components.sp_group.const import (
     DEVICE_CLASS_ENERGY,
+    DEVICE_CLASS_MONETARY,
     DEVICE_CLASS_WATER,
     ENTITY_CATEGORY_DIAGNOSTIC,
     SENSOR_KEY_ACCOUNT,
+    SENSOR_KEY_AMOUNT_DUE,
     SENSOR_KEY_ELECTRICITY,
     SENSOR_KEY_ELECTRICITY_LAST,
     SENSOR_KEY_GAS,
+    SENSOR_KEY_LAST_BILL,
     SENSOR_KEY_WATER,
     SENSOR_KEY_WATER_LAST,
     STATE_CLASS_MEASUREMENT,
     STATE_CLASS_TOTAL_INCREASING,
     UNIT_KWH,
     UNIT_M3,
+    UNIT_SGD,
 )
 from custom_components.sp_group.mapper import extra_attributes, sensors_from_usage
 
@@ -70,6 +74,19 @@ def test_sensors_match_energy_dashboard_contract() -> None:
     assert water_attrs["period_count"] == len(usage.water_periods)
     account_attrs = extra_attributes(usage, SENSOR_KEY_ACCOUNT)
     assert account_attrs["meter_reading_title"] == "Sep 2026"
+
+    last_bill = by_key[SENSOR_KEY_LAST_BILL]
+    assert last_bill.native_value == pytest.approx(203.69)
+    assert last_bill.device_class == DEVICE_CLASS_MONETARY
+    assert last_bill.state_class is None
+    assert last_bill.unit_of_measurement == UNIT_SGD
+    bill_attrs = extra_attributes(usage, SENSOR_KEY_LAST_BILL)
+    assert bill_attrs["bill_date"] == "2026-08-03T16:00:00Z"
+    assert bill_attrs["due_date"] == "2026-08-17T16:00:00Z"
+    assert "pdf_url" not in bill_attrs
+    amount_due = by_key[SENSOR_KEY_AMOUNT_DUE]
+    assert amount_due.native_value == pytest.approx(203.69)
+    assert amount_due.device_class == DEVICE_CLASS_MONETARY
 
 
 def test_gas_only_charts_yield_gas_sensors() -> None:

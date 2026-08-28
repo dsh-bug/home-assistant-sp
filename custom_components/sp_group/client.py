@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Protocol
 from urllib.error import HTTPError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from .const import (
@@ -40,6 +41,8 @@ from .const import (
     JARVIS_ME_PATH,
     JARVIS_PPMS_PATH,
     JARVIS_SMRD_PATH,
+    NJORD_HISTORY_PATH,
+    NJORD_PAYABLES_PATH,
     OAUTH_TOKEN_PATH,
     TOKEN_EXPIRY_BUFFER_SECONDS,
     USER_AGENT,
@@ -159,6 +162,23 @@ class MeterReadingInfo:
 
 
 @dataclass(frozen=True)
+class BillInfo:
+    amount_sgd: float
+    date: str | None
+    period: str | None
+    due_date: str | None
+    account_number: str | None
+
+
+@dataclass(frozen=True)
+class PayableInfo:
+    amount_sgd: float
+    currency: str | None
+    giro_enabled: bool | None
+    recurring_enabled: bool | None
+
+
+@dataclass(frozen=True)
 class UsageReadings:
     premise: PremiseInfo
     electricity: UtilitySeries | None
@@ -169,6 +189,8 @@ class UsageReadings:
     ppms_updated_at: str | None = None
     ami_hourly: tuple[PeriodReading, ...] = ()
     ami_daily: tuple[PeriodReading, ...] = ()
+    last_bill: BillInfo | None = None
+    amount_due: PayableInfo | None = None
 
     @property
     def premise_id(self) -> str:
@@ -242,6 +264,26 @@ def _optional_str(value: object) -> str | None:
     if isinstance(value, str) and value:
         return value
     return None
+
+
+def _optional_bool(value: object) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    return None
+
+
+def _cents_to_sgd(value: object) -> float | None:
+    cents = _optional_float(value)
+    if cents is None:
+        return None
+    return round(cents / 100.0, 2)
+
+
+def _account_digits(value: str | None) -> str:
+    if not value:
+        return ""
+    stripped = value.lstrip("0")
+    return stripped or "0"
 
 
 def _jwt_exp(token: str) -> int | None:
@@ -420,6 +462,72 @@ def _parse_meter_reading(body: object) -> MeterReadingInfo | None:
     return info
 
 
+def _parse_last_bill(body: object) -> BillInfo | None:
+    if not isinstance(body, dict):
+        return None
+    history = body.get("history")
+    if not isinstance(history, list):
+        return None
+    latest: tuple[str, BillInfo] | None = None
+    for row in history:
+        if not isinstance(row, dict):
+            continue
+        if row.get("type") != "bill":
+            continue
+        bill = row.get("bill")
+        if not isinstance(bill, dict):
+            continue
+        amount = _cents_to_sgd(bill.get("amount"))
+        if amount is None:
+            continue
+        info = BillInfo(
+            amount_sgd=amount,
+            date=_optional_str(bill.get("date")),
+            period=_optional_str(bill.get("period")),
+            due_date=_optional_str(bill.get("due_date")),
+            account_number=_optional_str(bill.get("account_number")),
+        )
+        stamp = _optional_str(row.get("created_at")) or info.date or ""
+        if latest is None or stamp > latest[0]:
+            latest = (stamp, info)
+    return latest[1] if latest is not None else None
+
+
+def _parse_payable(
+    body: object, premise_id: str, account_number: str | None
+) -> PayableInfo | None:
+    if not isinstance(body, dict):
+        return None
+    rows = body.get("payables")
+    if not isinstance(rows, list):
+        return None
+    wanted_account = _account_digits(account_number)
+    matched: PayableInfo | None = None
+    fallback: PayableInfo | None = None
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        amount = _cents_to_sgd(row.get("amount"))
+        if amount is None:
+            continue
+        info = PayableInfo(
+            amount_sgd=amount,
+            currency=_optional_str(row.get("currency")),
+            giro_enabled=_optional_bool(row.get("giro_enabled")),
+            recurring_enabled=_optional_bool(row.get("recurring_enabled")),
+        )
+        if fallback is None:
+            fallback = info
+        row_premise = _optional_str(row.get("premises_id"))
+        row_account = _account_digits(_optional_str(row.get("account_number")))
+        if row_premise == premise_id or (
+            wanted_account and row_account == wanted_account
+        ):
+            matched = info
+            break
+    return matched or fallback
+
+
 def _ami_stamp(value: datetime) -> str:
     return value.astimezone(SG_TZ).strftime(AMI_DATE_FORMAT)
 
@@ -580,6 +688,8 @@ class SpGroupClient:
         meter_reading = self._fetch_meter_reading(session, info.id)
         ppms_credit, ppms_updated = self._fetch_ppms(session, info)
         ami_hourly, ami_daily = self._fetch_ami(session, info)
+        last_bill = self._fetch_last_bill(session, info.account_number)
+        amount_due = self._fetch_amount_due(session, info)
         return UsageReadings(
             premise=info,
             electricity=electricity,
@@ -590,6 +700,8 @@ class SpGroupClient:
             ppms_updated_at=ppms_updated,
             ami_hourly=ami_hourly,
             ami_daily=ami_daily,
+            last_bill=last_bill,
+            amount_due=amount_due,
         )
 
     def _fetch_meter_reading(
@@ -621,6 +733,33 @@ class SpGroupClient:
         amount = _optional_float(body.get("amount"))
         updated = _optional_str(body.get("updated_at"))
         return amount, updated
+
+    def _fetch_last_bill(
+        self, session: Session, account_number: str | None
+    ) -> BillInfo | None:
+        if not account_number:
+            return None
+        query = urlencode({"account_numbers": account_number})
+        response = self._jarvis_get(session, f"{NJORD_HISTORY_PATH}?{query}")
+        if response.status >= 400:
+            return None
+        try:
+            body = _decode_json(response.body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return None
+        return _parse_last_bill(body)
+
+    def _fetch_amount_due(
+        self, session: Session, premise: PremiseInfo
+    ) -> PayableInfo | None:
+        response = self._jarvis_get(session, NJORD_PAYABLES_PATH)
+        if response.status >= 400:
+            return None
+        try:
+            body = _decode_json(response.body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return None
+        return _parse_payable(body, premise.id, premise.account_number)
 
     def _fetch_ami(
         self, session: Session, premise: PremiseInfo
