@@ -23,10 +23,10 @@ Copy `custom_components/sp_group` into `<config>/custom_components/sp_group` and
 After the first successful poll, usage is imported as long-term statistics.
 
 - Grid consumption: `sensor.sp_group_utilities_electricity`
-- Water: `sensor.sp_group_utilities_water` (Water section, not Grid)
+- Do not add water in Energy. SP only bills water monthly, so there is no hourly or daily water series.
 - Gas: `sensor.sp_group_utilities_gas` when the charts payload has billed gas periods
 
-When the premise has AMI electricity (`ami_elec`), the electricity sensor uses the same AMI series as the SP app: 30-minute slots for the last 31 days, plus daily points for about a year. The feed lags a few hours; empty slots after the last reported interval are dropped. Energy folds two slots into each clock hour because Home Assistant energy statistics are hourly. Water stays billed months (no AMI water on typical accounts).
+When the premise has AMI electricity (`ami_elec`), the electricity sensor uses the same AMI series as the SP app: 30-minute slots for the last 31 days, plus daily points for about a year. The feed lags a few hours; empty slots after the last reported interval are dropped. Energy folds two slots into each clock hour because Home Assistant energy statistics are hourly. Water is billed monthly only. The water total and last-billed sensors stay as numbers; they are not imported as Energy hourly statistics.
 
 Last billed period sensors (`*_last_billed`) are the latest bill. Do not add those as Energy grid sources. `Electricity today` and `Electricity last 30 min` are AMI measurements. The 30-minute sensor is the last slot SP has published, not the clock hour.
 
@@ -35,7 +35,7 @@ Last billed period sensors (`*_last_billed`) are the latest bill. Do not add tho
 | Entity | What it is |
 | --- | --- |
 | Electricity | Cumulative billed kWh (`total_increasing`) |
-| Water | Cumulative billed m³ (`total_increasing`) |
+| Water | Cumulative billed m³ (monthly bills, not an Energy hourly source) |
 | Gas | Cumulative billed usage, only if Jarvis returns gas periods |
 | Electricity / water / gas last billed | Latest billed period amount (`measurement`) |
 | Account | Account status, diagnostic. Attributes include address, account number, utilities, AMI flag, retailer, next meter-reading window |
@@ -62,7 +62,7 @@ Download diagnostics from the integration page if you need to file a bug. Tokens
 
 ## Use
 
-Add the cumulative electricity sensor as the Energy dashboard grid source, and the water sensor under Water. Automations can read last-billed amounts or account status without using those as energy statistics.
+Add the cumulative electricity sensor as the Energy dashboard grid source. Leave Water empty in Energy. Use `Water last billed` for the last month's m³.
 
 ## Known limitations
 

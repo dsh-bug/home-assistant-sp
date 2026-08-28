@@ -233,7 +233,7 @@ def sensors_from_usage(usage: UsageReadings | None) -> list[SensorSpec]:
                 translation_key=SENSOR_KEY_WATER,
                 native_value=usage.water.total,
                 device_class=DEVICE_CLASS_WATER,
-                state_class=STATE_CLASS_TOTAL_INCREASING,
+                state_class=None,
                 unit_of_measurement=UNIT_M3,
                 suggested_display_precision=2,
             )
