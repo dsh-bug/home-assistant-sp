@@ -37,6 +37,8 @@ class LaunchFixtureTransport:
         url: str,
         headers: Mapping[str, str],
         body: bytes | None,
+        *,
+        timeout: int | None = None,
     ) -> HttpResponse:
         parsed = urlparse(url)
         origin = f"{parsed.scheme}://{parsed.netloc}"

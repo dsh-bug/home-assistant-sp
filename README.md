@@ -29,7 +29,7 @@ AMI electricity lags a few hours. Empty future 30-minute slots are dropped. **El
 
 ## Entities
 
-Names below are the entity names. Unique id is `{premise_id}_{key}`. Optional rows are created only when that API returns data. Reload the integration after an upgrade if a new sensor is missing.
+Names below are the entity names. Unique id is `{premise_id}_{key}`. Optional rows are created only when that API returns data. New keys from a later poll are added without a reload.
 
 ### Usage
 
@@ -55,8 +55,8 @@ Names below are the entity names. Unique id is `{premise_id}_{key}`. Optional ro
 
 | Name | Key | What it is |
 | --- | --- | --- |
-| Electricity meter | `electricity_meter` | Last actual SMRD register, kWh |
-| Water meter | `water_meter` | Last actual SMRD register, m³ |
+| Electricity meter | `electricity_meter` | SMRD last_actual snapshot, kWh. `measurement`, not Energy |
+| Water meter | `water_meter` | SMRD last_actual snapshot, m³. `measurement`, not Energy |
 | Electricity this month | `electricity_goal` | Green Goals used kWh. Attributes: `goal_target`, `percent_difference`, `cost_difference_sgd` |
 | Water this month | `water_goal` | Same for water when used or target is non-zero |
 
@@ -71,8 +71,8 @@ Names below are the entity names. Unique id is `{premise_id}_{key}`. Optional ro
 | EV unpaid | `ev_unpaid` | Eva unpaid orders list is non-empty |
 | Unread notifications | `unread_notifications` | Notifications API returns a count |
 | Bill delivery | `bill_delivery` | Skalbox preferences exist (`e-bill` or `paper`) |
-| FCU | `fcu` | Frosty reports a paired Tengah fan coil |
-| SP tariff | `tariff` | Public priceplan host returns `sp_kwh_price` |
+| FCU | `fcu_{thing}` | One sensor per Frosty paired Tengah coil |
+| SP tariff | `tariff` | Public priceplan `sp_kwh_price`. Query uses last billed kWh, else 350 |
 | Account | `account` | Always. Status plus address, account number, AMI flag, retailer, next meter-reading window |
 
 Shared attributes on usage sensors: `premise_id`, `address`, `account_number`, `last_period`, `last_period_amount`, `period_count`, `average_consumption`, `comparison`.
@@ -93,15 +93,15 @@ Required, in order:
 8. `GET https://b2c.api.spdigital.sg/njord/v3/history?account_numbers={account}` latest `type=bill`. PDF URLs are not stored
 9. `GET https://b2c.api.spdigital.sg/jarvis/v5/greengoals/targets`
 
-Then optional reads. 4xx or empty payloads skip the matching sensor:
+Then optional reads (8s HTTP timeout each). 4xx or empty payloads skip the matching sensor:
 
 - `POST /1up/authenticated/graphql` GreenUP account
 - `GET /tyche/v1/wallet-summary`
-- `GET /eva/v1/sessions/latest`, `/eva/v2/order/receipts`, `/eva/v1/order/unpaid`
+- `GET /eva/v1/sessions/latest`, `/eva/v2/order/receipts`, `/eva/v1/order/unpaid`. A 403 `scope_not_found` on the session call skips the rest of Eva
 - `GET /notifications/v1/notifications` unread count only (bodies are not stored)
 - `GET /skalbox/b2c/account/v1/retrieveBillPreferences`
-- `POST /frosty/graphql` paired FCUs, then `/frosty/fcu_status`
-- `GET https://public.api.spdigital.sg/priceplan/v2/plans/price?consumption=350`
+- `POST /frosty/graphql` paired FCUs, then `/frosty/fcu_status` per `thingName`
+- `GET https://public.api.spdigital.sg/priceplan/v2/plans/price?consumption={last billed kWh or 350}`
 
 The refresh token is stored on the config entry so restarts do not password-login every time. Diagnostics omit the password and tokens.
 
@@ -114,7 +114,24 @@ Bill pay, GIRO setup, UniDollar pay, add card, start/stop EV charge, meter-readi
 - **invalid_claim / rejected session token:** the client must request the `me:*` scopes. Use this repo, not a stale copy.
 - **Suspicious request requires verification:** Auth0 bot detection after many password logins. Sign in once in the SP app, wait a few minutes, then reload or reauthenticate.
 - **No Energy statistics:** wait for the first poll, hard-refresh Energy settings, then pick `sensor.sp_group_utilities_electricity`, not last-billed or meter sensors.
-- **Missing optional sensor after upgrade:** reload the SP Group integration so setup can create new entities.
+- **Missing optional sensor after upgrade:** wait for the next poll. New keys are added without a reload.
+
+## Examples
+
+Notify when amount due is positive:
+
+```yaml
+automation:
+  - alias: SP bill due
+    triggers:
+      - trigger: numeric_state
+        entity_id: sensor.sp_group_utilities_amount_due
+        above: 0
+    actions:
+      - action: notify.notify
+        data:
+          message: "SP amount due {{ states('sensor.sp_group_utilities_amount_due') }} SGD"
+```
 
 ## Development
 

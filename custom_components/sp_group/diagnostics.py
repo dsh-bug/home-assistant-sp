@@ -52,6 +52,7 @@ async def async_get_config_entry_diagnostics(
         "has_ev_unpaid": usage.ev_unpaid is not None,
         "has_unread_notifications": usage.unread_notifications is not None,
         "has_bill_delivery": usage.bill_delivery is not None,
-        "has_fcu": usage.fcu is not None,
+        "has_fcu": bool(usage.fcus),
+        "fcu_count": len(usage.fcus),
         "has_tariff": usage.tariff is not None,
     }

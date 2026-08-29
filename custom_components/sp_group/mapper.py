@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 
-from .client import SG_TZ, PeriodReading, UsageReadings, UtilitySeries
+from .client import SG_TZ, FcuInfo, PeriodReading, UsageReadings, UtilitySeries
 from .const import (
     DEVICE_CLASS_ENERGY,
     DEVICE_CLASS_GAS,
@@ -56,6 +57,24 @@ class SensorSpec:
     unit_of_measurement: str | None
     entity_category: str | None = None
     suggested_display_precision: int | None = None
+    name: str | None = None
+
+
+_FCU_KEY_SAFE = re.compile(r"[^0-9A-Za-z]+")
+
+
+def _fcu_sensor_key(thing_name: str) -> str:
+    safe = _FCU_KEY_SAFE.sub("_", thing_name).strip("_").lower()
+    return f"{SENSOR_KEY_FCU}_{safe}" if safe else SENSOR_KEY_FCU
+
+
+def _fcu_from_key(usage: UsageReadings, key: str) -> FcuInfo | None:
+    for fcu in usage.fcus:
+        if _fcu_sensor_key(fcu.thing_name) == key:
+            return fcu
+    if key == SENSOR_KEY_FCU and len(usage.fcus) == 1:
+        return usage.fcus[0]
+    return None
 
 
 def _last_period(periods: tuple[PeriodReading, ...]) -> PeriodReading | None:
@@ -211,8 +230,8 @@ def extra_attributes(usage: UsageReadings, key: str) -> dict[str, object]:
         if unpaid is not None:
             attrs["order_count"] = unpaid.count
         return _omit_none(attrs)
-    if key == SENSOR_KEY_FCU:
-        fcu = usage.fcu
+    if key == SENSOR_KEY_FCU or key.startswith(f"{SENSOR_KEY_FCU}_"):
+        fcu = _fcu_from_key(usage, key)
         if fcu is not None:
             attrs["thing_name"] = fcu.thing_name
             attrs["display_name"] = fcu.display_name
@@ -424,7 +443,7 @@ def sensors_from_usage(usage: UsageReadings | None) -> list[SensorSpec]:
                 translation_key=SENSOR_KEY_ELECTRICITY_METER,
                 native_value=elec_meter.value,
                 device_class=DEVICE_CLASS_ENERGY,
-                state_class=STATE_CLASS_TOTAL_INCREASING,
+                state_class=STATE_CLASS_MEASUREMENT,
                 unit_of_measurement=UNIT_KWH,
                 suggested_display_precision=0,
             )
@@ -437,7 +456,7 @@ def sensors_from_usage(usage: UsageReadings | None) -> list[SensorSpec]:
                 translation_key=SENSOR_KEY_WATER_METER,
                 native_value=water_meter.value,
                 device_class=DEVICE_CLASS_WATER,
-                state_class=STATE_CLASS_TOTAL_INCREASING,
+                state_class=STATE_CLASS_MEASUREMENT,
                 unit_of_measurement=UNIT_M3,
                 suggested_display_precision=1,
             )
@@ -562,22 +581,20 @@ def sensors_from_usage(usage: UsageReadings | None) -> list[SensorSpec]:
                 entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
             )
         )
-    if usage.fcu is not None:
+    for fcu in usage.fcus:
+        has_temp = fcu.room_temperature is not None
         specs.append(
             SensorSpec(
-                key=SENSOR_KEY_FCU,
+                key=_fcu_sensor_key(fcu.thing_name),
                 translation_key=SENSOR_KEY_FCU,
-                native_value=usage.fcu.room_temperature
-                if usage.fcu.room_temperature is not None
-                else ("on" if usage.fcu.is_on else "off"),
+                native_value=fcu.room_temperature
+                if has_temp
+                else ("on" if fcu.is_on else "off"),
                 device_class=None,
-                state_class=STATE_CLASS_MEASUREMENT
-                if usage.fcu.room_temperature is not None
-                else None,
-                unit_of_measurement="°C"
-                if usage.fcu.room_temperature is not None
-                else None,
+                state_class=STATE_CLASS_MEASUREMENT if has_temp else None,
+                unit_of_measurement="°C" if has_temp else None,
                 suggested_display_precision=1,
+                name=fcu.display_name or fcu.thing_name,
             )
         )
     if usage.tariff is not None and usage.tariff.kwh_price is not None:
