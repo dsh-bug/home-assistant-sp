@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from .const import DOMAIN
 
@@ -17,6 +17,8 @@ if TYPE_CHECKING:
     type SpGroupConfigEntry = ConfigEntry[SpGroupCoordinator]
 
 PLATFORMS = ["sensor"]
+
+__all__ = ["DOMAIN", "PLATFORMS"]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -61,8 +63,3 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-
-
-async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
-    hass.data.setdefault(DOMAIN, {})
-    return True

@@ -1,16 +1,25 @@
 # SP Group for Home Assistant
 
+[![hacs](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
+[![GitHub release](https://img.shields.io/github/v/release/maci0/home-assistant-sp)](https://github.com/maci0/home-assistant-sp/releases)
+
 Unofficial HACS integration for Singapore Power e-accounts. It polls the same Auth0 + Jarvis + Njord APIs as Android app `sg.com.singaporepower.spservices` 15.10.0 and exposes usage, bills, meter registers, and optional EV / GreenUP / Tengah sensors.
+
+Not affiliated with SP Group.
 
 ## Install
 
 ### HACS
 
-1. HACS → Integrations → Custom repositories
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=maci0&repository=home-assistant-sp&category=integration)
+
+1. HACS → three dots → Custom repositories
 2. URL `https://github.com/maci0/home-assistant-sp`, category Integration
 3. Download **SP Group**, restart Home Assistant
 4. Settings → Devices & services → Add integration → **SP Group**
 5. Sign in with the same e-account email and password as the SP app
+
+Until this is in the HACS default store, the custom repository step is required. HACS then tracks GitHub releases.
 
 ### Manual
 

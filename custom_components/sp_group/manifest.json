@@ -1,6 +1,7 @@
 {
   "domain": "sp_group",
   "name": "SP Group",
+  "after_dependencies": ["recorder"],
   "codeowners": ["@maci0"],
   "config_flow": true,
   "documentation": "https://github.com/maci0/home-assistant-sp",
@@ -9,5 +10,5 @@
   "issue_tracker": "https://github.com/maci0/home-assistant-sp/issues",
   "loggers": ["custom_components.sp_group"],
   "requirements": [],
-  "version": "1.2.6"
+  "version": "1.2.7"
 }
