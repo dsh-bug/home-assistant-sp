@@ -540,16 +540,20 @@ def sensors_from_usage(usage: UsageReadings | None) -> list[SensorSpec]:
             SensorSpec(
                 key=SENSOR_KEY_EV_UNPAID,
                 translation_key=SENSOR_KEY_EV_UNPAID,
-                native_value=usage.ev_unpaid.amount
-                if usage.ev_unpaid.amount is not None
-                else usage.ev_unpaid.count,
-                device_class=DEVICE_CLASS_MONETARY
-                if usage.ev_unpaid.amount is not None
-                else None,
+                native_value=(
+                    usage.ev_unpaid.amount
+                    if usage.ev_unpaid.amount is not None
+                    else usage.ev_unpaid.count
+                ),
+                device_class=(
+                    DEVICE_CLASS_MONETARY
+                    if usage.ev_unpaid.amount is not None
+                    else None
+                ),
                 state_class=None,
-                unit_of_measurement=UNIT_SGD
-                if usage.ev_unpaid.amount is not None
-                else None,
+                unit_of_measurement=(
+                    UNIT_SGD if usage.ev_unpaid.amount is not None else None
+                ),
                 suggested_display_precision=2,
             )
         )
@@ -587,9 +591,9 @@ def sensors_from_usage(usage: UsageReadings | None) -> list[SensorSpec]:
             SensorSpec(
                 key=_fcu_sensor_key(fcu.thing_name),
                 translation_key=SENSOR_KEY_FCU,
-                native_value=fcu.room_temperature
-                if has_temp
-                else ("on" if fcu.is_on else "off"),
+                native_value=(
+                    fcu.room_temperature if has_temp else ("on" if fcu.is_on else "off")
+                ),
                 device_class=None,
                 state_class=STATE_CLASS_MEASUREMENT if has_temp else None,
                 unit_of_measurement="°C" if has_temp else None,
