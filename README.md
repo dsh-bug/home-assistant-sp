@@ -42,6 +42,14 @@ Last billed period sensors (`*_last_billed`) are the latest bill. Do not add tho
 | Prepaid credit | PPMS balance in SGD, only when `/me` says a prepaid account exists |
 | Last bill | Latest utility bill in SGD from Njord history |
 | Amount due | Outstanding payable in SGD. Negative is a credit |
+| Electricity / water meter | Last actual register from SMRD (`total_increasing`) |
+| Electricity this month | Green Goals month-to-date kWh vs `goal_target` |
+| GreenUP points | 1UP account points and tier, if the GraphQL account exists |
+| EV wallet / session / last charge / unpaid | Eva + Tyche, only when the account has EV data |
+| Unread notifications | In-app unread count |
+| Bill delivery | e-bill vs paper, if Skalbox preferences exist |
+| FCU | Tengah paired fan coil: room temperature, on/off |
+| SP tariff | Public regulated kWh price, if the priceplan host returns it |
 
 Shared attributes on usage sensors: `premise_id`, `address`, `account_number`, `last_period`, `last_period_amount`, `period_count`, `average_consumption`, `comparison`.
 
@@ -59,6 +67,8 @@ Polls about once an hour:
 6. `GET https://b2c.api.spdigital.sg/jarvis/v3/ppms/balance/{premise_id}` only if `ppms_details.exists` is true
 7. `GET https://b2c.api.spdigital.sg/njord/v4/payables` for the amount due (Njord stores dollars as integer cents)
 8. `GET https://b2c.api.spdigital.sg/njord/v3/history?account_numbers={account}` for the latest `type=bill` row. PDF download URLs are not stored.
+9. `GET https://b2c.api.spdigital.sg/jarvis/v5/greengoals/targets` for the current month's used vs target. Zero used and target rows are skipped.
+10. Optional reads that are skipped when the account has no data: GreenUP GraphQL, Tyche wallet, Eva session/history/unpaid, notifications unread count, Skalbox bill preferences, Frosty paired FCUs, public priceplan.
 
 The session refresh token is stored on the config entry so Home Assistant restarts do not password-login every time.
 
@@ -70,7 +80,7 @@ Add the cumulative electricity sensor as the Energy dashboard grid source. Leave
 
 ## Known limitations
 
-AMI electricity is 30-minute slots for 31 days and daily points for about 13 months, matching the app's Today / month / year charts. Last bill and amount due are the same Njord dollar figures the app shows. EV charging, GreenUP, bill pay mutations, meter-reading submission, and Singpass login are not included. Town-gas sensors appear only when Jarvis returns billed `gas` periods. Prepaid credit is skipped when the account is not PPMS.
+AMI electricity is 30-minute slots for 31 days and daily points for about 13 months, matching the app's Today / month / year charts. Last bill and amount due are the same Njord dollar figures the app shows. Green Goals is month-to-date used vs a target, not the AMI today sensor. Optional EV, GreenUP, FCU, notifications, bill delivery, and tariff sensors appear only when those APIs return data. Bill pay mutations, meter-reading submission, start/stop charge, and Singpass login are not included. Town-gas sensors appear only when Jarvis returns billed `gas` periods. Prepaid credit is skipped when the account is not PPMS.
 
 ## Remove
 

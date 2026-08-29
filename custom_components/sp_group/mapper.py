@@ -14,16 +14,29 @@ from .const import (
     ENTITY_CATEGORY_DIAGNOSTIC,
     SENSOR_KEY_ACCOUNT,
     SENSOR_KEY_AMOUNT_DUE,
+    SENSOR_KEY_BILL_DELIVERY,
     SENSOR_KEY_ELECTRICITY,
+    SENSOR_KEY_ELECTRICITY_GOAL,
     SENSOR_KEY_ELECTRICITY_HOUR,
     SENSOR_KEY_ELECTRICITY_LAST,
+    SENSOR_KEY_ELECTRICITY_METER,
     SENSOR_KEY_ELECTRICITY_TODAY,
+    SENSOR_KEY_EV_LAST_CHARGE,
+    SENSOR_KEY_EV_SESSION,
+    SENSOR_KEY_EV_UNPAID,
+    SENSOR_KEY_EV_WALLET,
+    SENSOR_KEY_FCU,
     SENSOR_KEY_GAS,
     SENSOR_KEY_GAS_LAST,
+    SENSOR_KEY_GREENUP_POINTS,
     SENSOR_KEY_LAST_BILL,
     SENSOR_KEY_PPMS,
+    SENSOR_KEY_TARIFF,
+    SENSOR_KEY_UNREAD_NOTIFICATIONS,
     SENSOR_KEY_WATER,
+    SENSOR_KEY_WATER_GOAL,
     SENSOR_KEY_WATER_LAST,
+    SENSOR_KEY_WATER_METER,
     STATE_CLASS_MEASUREMENT,
     STATE_CLASS_TOTAL_INCREASING,
     UNIT_KWH,
@@ -135,6 +148,90 @@ def extra_attributes(usage: UsageReadings, key: str) -> dict[str, object]:
             attrs["currency"] = due.currency
             attrs["giro_enabled"] = due.giro_enabled
             attrs["recurring_enabled"] = due.recurring_enabled
+        return _omit_none(attrs)
+    if key == SENSOR_KEY_ELECTRICITY_METER:
+        meter = usage.meter("electric")
+        if meter is not None:
+            attrs["meter_id"] = meter.meter_id
+            attrs["last_actual_at"] = meter.last_actual_at
+        return _omit_none(attrs)
+    if key == SENSOR_KEY_WATER_METER:
+        meter = usage.meter("water")
+        if meter is not None:
+            attrs["meter_id"] = meter.meter_id
+            attrs["last_actual_at"] = meter.last_actual_at
+        return _omit_none(attrs)
+    if key == SENSOR_KEY_ELECTRICITY_GOAL:
+        goal = usage.goal("elec")
+        if goal is not None:
+            attrs["goal_month"] = goal.month
+            attrs["goal_target"] = goal.target
+            attrs["percent_difference"] = goal.percent_difference
+            attrs["cost_difference_sgd"] = goal.cost_difference_sgd
+        return _omit_none(attrs)
+    if key == SENSOR_KEY_WATER_GOAL:
+        goal = usage.goal("water")
+        if goal is not None:
+            attrs["goal_month"] = goal.month
+            attrs["goal_target"] = goal.target
+            attrs["percent_difference"] = goal.percent_difference
+            attrs["cost_difference_sgd"] = goal.cost_difference_sgd
+        return _omit_none(attrs)
+    if key == SENSOR_KEY_GREENUP_POINTS:
+        info = usage.greenup
+        if info is not None:
+            attrs["tier_name"] = info.tier_name
+            attrs["tier_level"] = info.tier_level
+            attrs["points_to_level_up"] = info.points_to_level_up
+        return _omit_none(attrs)
+    if key == SENSOR_KEY_EV_WALLET:
+        wallet = usage.ev_wallet
+        if wallet is not None:
+            attrs["dollar_balance"] = wallet.dollar_balance
+            attrs["current_tier_id"] = wallet.current_tier_id
+        return _omit_none(attrs)
+    if key == SENSOR_KEY_EV_SESSION:
+        session = usage.ev_session
+        if session is not None:
+            attrs["kwh"] = session.kwh
+            attrs["total_cost"] = session.total_cost
+            attrs["start"] = session.start
+            attrs["order_id"] = session.order_id
+        return _omit_none(attrs)
+    if key == SENSOR_KEY_EV_LAST_CHARGE:
+        charge = usage.ev_last_charge
+        if charge is not None:
+            attrs["amount"] = charge.amount
+            attrs["created_at"] = charge.created_at
+            attrs["status"] = charge.status
+            attrs["address"] = charge.address
+        return _omit_none(attrs)
+    if key == SENSOR_KEY_EV_UNPAID:
+        unpaid = usage.ev_unpaid
+        if unpaid is not None:
+            attrs["order_count"] = unpaid.count
+        return _omit_none(attrs)
+    if key == SENSOR_KEY_FCU:
+        fcu = usage.fcu
+        if fcu is not None:
+            attrs["thing_name"] = fcu.thing_name
+            attrs["display_name"] = fcu.display_name
+            attrs["is_on"] = fcu.is_on
+            attrs["is_online"] = fcu.is_online
+            attrs["setpoint"] = fcu.setpoint
+            attrs["mode"] = fcu.mode
+        return _omit_none(attrs)
+    if key == SENSOR_KEY_TARIFF:
+        tariff = usage.tariff
+        if tariff is not None:
+            attrs["monthly_price"] = tariff.monthly_price
+            attrs["consumption"] = tariff.consumption
+        return _omit_none(attrs)
+    if key == SENSOR_KEY_BILL_DELIVERY:
+        delivery = usage.bill_delivery
+        if delivery is not None:
+            attrs["soft_copy"] = delivery.soft_copy
+            attrs["hard_copy"] = delivery.hard_copy
         return _omit_none(attrs)
     series: UtilitySeries | None
     if key in {
@@ -317,6 +414,183 @@ def sensors_from_usage(usage: UsageReadings | None) -> list[SensorSpec]:
                 state_class=None,
                 unit_of_measurement=UNIT_SGD,
                 suggested_display_precision=2,
+            )
+        )
+    elec_meter = usage.meter("electric")
+    if elec_meter is not None:
+        specs.append(
+            SensorSpec(
+                key=SENSOR_KEY_ELECTRICITY_METER,
+                translation_key=SENSOR_KEY_ELECTRICITY_METER,
+                native_value=elec_meter.value,
+                device_class=DEVICE_CLASS_ENERGY,
+                state_class=STATE_CLASS_TOTAL_INCREASING,
+                unit_of_measurement=UNIT_KWH,
+                suggested_display_precision=0,
+            )
+        )
+    water_meter = usage.meter("water")
+    if water_meter is not None:
+        specs.append(
+            SensorSpec(
+                key=SENSOR_KEY_WATER_METER,
+                translation_key=SENSOR_KEY_WATER_METER,
+                native_value=water_meter.value,
+                device_class=DEVICE_CLASS_WATER,
+                state_class=STATE_CLASS_TOTAL_INCREASING,
+                unit_of_measurement=UNIT_M3,
+                suggested_display_precision=1,
+            )
+        )
+    elec_goal = usage.goal("elec")
+    if elec_goal is not None:
+        specs.append(
+            SensorSpec(
+                key=SENSOR_KEY_ELECTRICITY_GOAL,
+                translation_key=SENSOR_KEY_ELECTRICITY_GOAL,
+                native_value=elec_goal.used,
+                device_class=None,
+                state_class=STATE_CLASS_MEASUREMENT,
+                unit_of_measurement=UNIT_KWH,
+                suggested_display_precision=1,
+            )
+        )
+    water_goal = usage.goal("water")
+    if water_goal is not None:
+        specs.append(
+            SensorSpec(
+                key=SENSOR_KEY_WATER_GOAL,
+                translation_key=SENSOR_KEY_WATER_GOAL,
+                native_value=water_goal.used,
+                device_class=None,
+                state_class=STATE_CLASS_MEASUREMENT,
+                unit_of_measurement=UNIT_M3,
+                suggested_display_precision=2,
+            )
+        )
+    if usage.greenup is not None:
+        specs.append(
+            SensorSpec(
+                key=SENSOR_KEY_GREENUP_POINTS,
+                translation_key=SENSOR_KEY_GREENUP_POINTS,
+                native_value=usage.greenup.points,
+                device_class=None,
+                state_class=None,
+                unit_of_measurement="points",
+                entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+                suggested_display_precision=0,
+            )
+        )
+    if usage.ev_wallet is not None:
+        specs.append(
+            SensorSpec(
+                key=SENSOR_KEY_EV_WALLET,
+                translation_key=SENSOR_KEY_EV_WALLET,
+                native_value=usage.ev_wallet.points,
+                device_class=None,
+                state_class=None,
+                unit_of_measurement="points",
+                suggested_display_precision=0,
+            )
+        )
+    if usage.ev_session is not None:
+        specs.append(
+            SensorSpec(
+                key=SENSOR_KEY_EV_SESSION,
+                translation_key=SENSOR_KEY_EV_SESSION,
+                native_value=usage.ev_session.status or "unknown",
+                device_class=None,
+                state_class=None,
+                unit_of_measurement=None,
+            )
+        )
+    if usage.ev_last_charge is not None and usage.ev_last_charge.kwh is not None:
+        specs.append(
+            SensorSpec(
+                key=SENSOR_KEY_EV_LAST_CHARGE,
+                translation_key=SENSOR_KEY_EV_LAST_CHARGE,
+                native_value=usage.ev_last_charge.kwh,
+                device_class=DEVICE_CLASS_ENERGY,
+                state_class=None,
+                unit_of_measurement=UNIT_KWH,
+                suggested_display_precision=2,
+            )
+        )
+    if usage.ev_unpaid is not None:
+        specs.append(
+            SensorSpec(
+                key=SENSOR_KEY_EV_UNPAID,
+                translation_key=SENSOR_KEY_EV_UNPAID,
+                native_value=usage.ev_unpaid.amount
+                if usage.ev_unpaid.amount is not None
+                else usage.ev_unpaid.count,
+                device_class=DEVICE_CLASS_MONETARY
+                if usage.ev_unpaid.amount is not None
+                else None,
+                state_class=None,
+                unit_of_measurement=UNIT_SGD
+                if usage.ev_unpaid.amount is not None
+                else None,
+                suggested_display_precision=2,
+            )
+        )
+    if usage.unread_notifications is not None:
+        specs.append(
+            SensorSpec(
+                key=SENSOR_KEY_UNREAD_NOTIFICATIONS,
+                translation_key=SENSOR_KEY_UNREAD_NOTIFICATIONS,
+                native_value=usage.unread_notifications,
+                device_class=None,
+                state_class=None,
+                unit_of_measurement=None,
+                entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            )
+        )
+    if usage.bill_delivery is not None:
+        delivery = "e-bill" if usage.bill_delivery.soft_copy else "paper"
+        hard = usage.bill_delivery.hard_copy is True
+        if usage.bill_delivery.soft_copy is None and hard:
+            delivery = "paper"
+        specs.append(
+            SensorSpec(
+                key=SENSOR_KEY_BILL_DELIVERY,
+                translation_key=SENSOR_KEY_BILL_DELIVERY,
+                native_value=delivery,
+                device_class=None,
+                state_class=None,
+                unit_of_measurement=None,
+                entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            )
+        )
+    if usage.fcu is not None:
+        specs.append(
+            SensorSpec(
+                key=SENSOR_KEY_FCU,
+                translation_key=SENSOR_KEY_FCU,
+                native_value=usage.fcu.room_temperature
+                if usage.fcu.room_temperature is not None
+                else ("on" if usage.fcu.is_on else "off"),
+                device_class=None,
+                state_class=STATE_CLASS_MEASUREMENT
+                if usage.fcu.room_temperature is not None
+                else None,
+                unit_of_measurement="°C"
+                if usage.fcu.room_temperature is not None
+                else None,
+                suggested_display_precision=1,
+            )
+        )
+    if usage.tariff is not None and usage.tariff.kwh_price is not None:
+        specs.append(
+            SensorSpec(
+                key=SENSOR_KEY_TARIFF,
+                translation_key=SENSOR_KEY_TARIFF,
+                native_value=usage.tariff.kwh_price,
+                device_class=DEVICE_CLASS_MONETARY,
+                state_class=None,
+                unit_of_measurement=UNIT_SGD,
+                entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+                suggested_display_precision=4,
             )
         )
     return specs

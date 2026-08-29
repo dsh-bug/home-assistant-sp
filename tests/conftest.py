@@ -13,6 +13,7 @@ from custom_components.sp_group.const import (
     IDENTITY_HOST,
     JARVIS_AMI_PATH,
     JARVIS_CHARTS_PATH,
+    JARVIS_GREEN_GOALS_PATH,
     JARVIS_ME_PATH,
     JARVIS_PPMS_PATH,
     JARVIS_SMRD_PATH,
@@ -123,6 +124,12 @@ class FixtureTransport:
                 status=401,
                 headers={"Content-Type": "application/json"},
                 body=b'{"error":"no_ppms_account"}',
+            )
+        if method == "GET" and origin == B2C_HOST and path == JARVIS_GREEN_GOALS_PATH:
+            return HttpResponse(
+                status=200,
+                headers={"Content-Type": "application/json"},
+                body=load_fixture("jarvis_greengoals.json"),
             )
         if method == "GET" and origin == B2C_HOST and path == NJORD_PAYABLES_PATH:
             return HttpResponse(
