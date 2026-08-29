@@ -1,8 +1,14 @@
 """SP Group Auth0 + Jarvis HTTP client.
 
-Contract taken from APK sg.com.singaporepower.spservices 15.10.0
-(Auth0ApiService, LoginRequest, JarvisApiServiceV2, HistoryChartResponseModel,
-PremiseResponseModel, PremiseAccountModel, PpmsCreditBalance, MeterReadingModel).
+Reads billed usage, AMI half-hours, Njord bills, SMRD registers, Green Goals,
+and optional GreenUP / Eva / Frosty / notification payloads from the same
+hosts as Android app sg.com.singaporepower.spservices 15.10.0.
+
+Eva ChargeHistoryV2.transaction_amount and UnpaidOrders.amount are Java String.
+Dotted values are dollars. Integer-only values with abs >= EVA_INTEGER_CENTS_MIN
+are cents. Frosty getPairedFCUs can return more than one Tengah coil; each
+thingName is its own sensor. Optional hosts use OPTIONAL_HTTP_TIMEOUT_SECONDS
+so a hung Eva or Frosty call does not block the 30-minute poll.
 """
 
 from __future__ import annotations
@@ -36,12 +42,14 @@ from .const import (
     BILL_PREFERENCES_PATH,
     CONTENT_TYPE_JSON,
     EVA_CHARGE_HISTORY_PATH,
+    EVA_INTEGER_CENTS_MIN,
     EVA_LATEST_SESSION_PATH,
     EVA_UNPAID_PATH,
     FROSTY_FCU_STATUS_PATH,
     FROSTY_GRAPHQL_PATH,
     GREENUP_GRAPHQL_PATH,
     HEADER_ID_TOKEN,
+    HTTP_TIMEOUT_SECONDS,
     IDENTITY_HOST,
     JARVIS_AMI_PATH,
     JARVIS_CHARTS_PATH,
@@ -53,8 +61,10 @@ from .const import (
     NJORD_PAYABLES_PATH,
     NOTIFICATIONS_PATH,
     OAUTH_TOKEN_PATH,
+    OPTIONAL_HTTP_TIMEOUT_SECONDS,
     PRICEPLAN_PATH,
     PUBLIC_HOST,
+    TARIFF_DEFAULT_CONSUMPTION_KWH,
     TOKEN_EXPIRY_BUFFER_SECONDS,
     TYCHE_WALLET_PATH,
     USER_AGENT,
@@ -98,6 +108,8 @@ class Transport(Protocol):
         url: str,
         headers: Mapping[str, str],
         body: bytes | None,
+        *,
+        timeout: int | None = None,
     ) -> HttpResponse: ...
 
 
@@ -108,11 +120,14 @@ class UrllibTransport:
         url: str,
         headers: Mapping[str, str],
         body: bytes | None,
+        *,
+        timeout: int | None = None,
     ) -> HttpResponse:
         request = Request(url, data=body, method=method, headers=dict(headers))
         context = ssl.create_default_context()
+        seconds = HTTP_TIMEOUT_SECONDS if timeout is None else timeout
         try:
-            with urlopen(request, timeout=30, context=context) as response:
+            with urlopen(request, timeout=seconds, context=context) as response:
                 return HttpResponse(
                     status=int(response.status),
                     headers={k: v for k, v in response.headers.items()},
@@ -283,6 +298,19 @@ class TariffInfo:
 
 
 @dataclass(frozen=True)
+class OptionalReads:
+    greenup: GreenUpInfo | None = None
+    ev_wallet: EvWalletInfo | None = None
+    ev_session: EvSessionInfo | None = None
+    ev_last_charge: EvChargeInfo | None = None
+    ev_unpaid: EvUnpaidInfo | None = None
+    unread_notifications: int | None = None
+    bill_delivery: BillDeliveryInfo | None = None
+    fcus: tuple[FcuInfo, ...] = ()
+    tariff: TariffInfo | None = None
+
+
+@dataclass(frozen=True)
 class UsageReadings:
     premise: PremiseInfo
     electricity: UtilitySeries | None
@@ -304,7 +332,7 @@ class UsageReadings:
     ev_unpaid: EvUnpaidInfo | None = None
     unread_notifications: int | None = None
     bill_delivery: BillDeliveryInfo | None = None
-    fcu: FcuInfo | None = None
+    fcus: tuple[FcuInfo, ...] = ()
     tariff: TariffInfo | None = None
 
     @property
@@ -365,6 +393,60 @@ def _optional_json(response: HttpResponse) -> object | None:
         return _decode_json(response.body)
     except (json.JSONDecodeError, UnicodeDecodeError):
         return None
+
+
+def _eva_scope_denied(response: HttpResponse) -> bool:
+    if response.status != 403:
+        return False
+    try:
+        body = _decode_json(response.body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return False
+    if not isinstance(body, dict):
+        return False
+    error = str(body.get("error") or "")
+    description = str(body.get("error_description") or "")
+    return error == "scope_not_found" or "scope_not_found" in description
+
+
+def _eva_sgd(value: object) -> float | None:
+    """Eva money fields are Java String, not Njord integer cents."""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, float):
+        return round(value, 2)
+    if isinstance(value, int):
+        if abs(value) >= EVA_INTEGER_CENTS_MIN:
+            return round(value / 100.0, 2)
+        return float(value)
+    if isinstance(value, str) and value.strip():
+        text = value.strip()
+        if "." in text:
+            try:
+                return round(float(text), 2)
+            except ValueError:
+                return None
+        try:
+            number = int(text)
+        except ValueError:
+            try:
+                return round(float(text), 2)
+            except ValueError:
+                return None
+        if abs(number) >= EVA_INTEGER_CENTS_MIN:
+            return round(number / 100.0, 2)
+        return float(number)
+    return None
+
+
+def _tariff_consumption(electricity: UtilitySeries | None) -> str:
+    if electricity is None or not electricity.periods:
+        return str(TARIFF_DEFAULT_CONSUMPTION_KWH)
+    last = max(electricity.periods, key=lambda item: item.start)
+    kwh = int(round(last.amount))
+    if kwh <= 0:
+        return str(TARIFF_DEFAULT_CONSUMPTION_KWH)
+    return str(kwh)
 
 
 def _require_mapping(value: object, label: str) -> dict[str, object]:
@@ -770,7 +852,7 @@ def _parse_ev_last_charge(body: object) -> EvChargeInfo | None:
     kwh = _optional_float(first.get("total_consumption")) or _optional_float(
         first.get("connector_kwh")
     )
-    amount = _optional_float(first.get("transaction_amount"))
+    amount = _eva_sgd(first.get("transaction_amount"))
     if kwh is None and amount is None:
         return None
     return EvChargeInfo(
@@ -795,7 +877,7 @@ def _parse_ev_unpaid(body: object) -> EvUnpaidInfo | None:
     for row in rows:
         if not isinstance(row, dict):
             continue
-        amount = _optional_float(row.get("amount"))
+        amount = _eva_sgd(row.get("amount"))
         if amount is not None:
             total += amount
             found = True
@@ -810,10 +892,12 @@ def _parse_unread(body: object) -> int | None:
         return None
     if isinstance(value, int):
         return value
-    try:
-        return int(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return None
+    if isinstance(value, str) and value:
+        try:
+            return int(value)
+        except ValueError:
+            return None
+    return None
 
 
 def _parse_bill_delivery(
@@ -1050,6 +1134,7 @@ class SpGroupClient:
             f"{IDENTITY_HOST}{OAUTH_TOKEN_PATH}",
             _oauth_headers(),
             json.dumps(payload).encode("utf-8"),
+            timeout=HTTP_TIMEOUT_SECONDS,
         )
         body = _decode_json(response.body)
         mapping = body if isinstance(body, dict) else {}
@@ -1081,16 +1166,26 @@ class SpGroupClient:
             "Accept": "application/json",
         }
 
-    def _jarvis_get(self, session: Session, path: str) -> HttpResponse:
+    def _jarvis_get(
+        self,
+        session: Session,
+        path: str,
+        timeout: int = HTTP_TIMEOUT_SECONDS,
+    ) -> HttpResponse:
         return self._transport.request(
             "GET",
             f"{B2C_HOST}{path}",
             self._auth_headers(session),
             None,
+            timeout=timeout,
         )
 
     def _jarvis_post(
-        self, session: Session, path: str, payload: Mapping[str, object]
+        self,
+        session: Session,
+        path: str,
+        payload: Mapping[str, object],
+        timeout: int = HTTP_TIMEOUT_SECONDS,
     ) -> HttpResponse:
         headers = dict(self._auth_headers(session))
         headers["Content-Type"] = CONTENT_TYPE_JSON
@@ -1099,16 +1194,21 @@ class SpGroupClient:
             f"{B2C_HOST}{path}",
             headers,
             json.dumps(payload).encode("utf-8"),
+            timeout=timeout,
         )
 
     def _optional_get(self, session: Session, path: str) -> object | None:
-        response = self._jarvis_get(session, path)
+        response = self._jarvis_get(
+            session, path, timeout=OPTIONAL_HTTP_TIMEOUT_SECONDS
+        )
         return _optional_json(response)
 
     def _optional_post(
         self, session: Session, path: str, payload: Mapping[str, object]
     ) -> object | None:
-        response = self._jarvis_post(session, path, payload)
+        response = self._jarvis_post(
+            session, path, payload, timeout=OPTIONAL_HTTP_TIMEOUT_SECONDS
+        )
         return _optional_json(response)
 
     def _fetch_usage_with(self, session: Session) -> UsageReadings:
@@ -1131,7 +1231,7 @@ class SpGroupClient:
         last_bill = self._fetch_last_bill(session, info.account_number)
         amount_due = self._fetch_amount_due(session, info)
         green_goals = self._fetch_green_goals(session, info.id)
-        extras = self._fetch_optional(session, info)
+        extras = self._fetch_optional(session, info, electricity)
         return UsageReadings(
             premise=info,
             electricity=electricity,
@@ -1146,15 +1246,15 @@ class SpGroupClient:
             amount_due=amount_due,
             meter_registers=meter_registers,
             green_goals=green_goals,
-            greenup=extras[0],
-            ev_wallet=extras[1],
-            ev_session=extras[2],
-            ev_last_charge=extras[3],
-            ev_unpaid=extras[4],
-            unread_notifications=extras[5],
-            bill_delivery=extras[6],
-            fcu=extras[7],
-            tariff=extras[8],
+            greenup=extras.greenup,
+            ev_wallet=extras.ev_wallet,
+            ev_session=extras.ev_session,
+            ev_last_charge=extras.ev_last_charge,
+            ev_unpaid=extras.ev_unpaid,
+            unread_notifications=extras.unread_notifications,
+            bill_delivery=extras.bill_delivery,
+            fcus=extras.fcus,
+            tariff=extras.tariff,
         )
 
     def _fetch_meter_reading(
@@ -1178,66 +1278,67 @@ class SpGroupClient:
         return _parse_green_goals(body, premise_id)
 
     def _fetch_optional(
-        self, session: Session, premise: PremiseInfo
-    ) -> tuple[
-        GreenUpInfo | None,
-        EvWalletInfo | None,
-        EvSessionInfo | None,
-        EvChargeInfo | None,
-        EvUnpaidInfo | None,
-        int | None,
-        BillDeliveryInfo | None,
-        FcuInfo | None,
-        TariffInfo | None,
-    ]:
+        self,
+        session: Session,
+        premise: PremiseInfo,
+        electricity: UtilitySeries | None,
+    ) -> OptionalReads:
         greenup = _parse_greenup(
             self._optional_post(
                 session, GREENUP_GRAPHQL_PATH, {"query": GREENUP_ACCOUNT_QUERY}
             )
         )
         ev_wallet = _parse_ev_wallet(self._optional_get(session, TYCHE_WALLET_PATH))
-        ev_session = _parse_ev_session(
-            self._optional_get(session, EVA_LATEST_SESSION_PATH)
-        )
-        history_qs = urlencode({"offSet": "0", "pageSize": "5"})
-        history_path = f"{EVA_CHARGE_HISTORY_PATH}?{history_qs}"
-        history_body = self._optional_get(session, history_path)
-        ev_last_charge = _parse_ev_last_charge(history_body)
-        ev_unpaid = _parse_ev_unpaid(self._optional_get(session, EVA_UNPAID_PATH))
-        unread_path = (
-            f"{NOTIFICATIONS_PATH}?"
-            + urlencode(
-                {
-                    "limit": "1",
-                    "include_totals_unread_notifications": "true",
-                    "include_notifications": "false",
-                }
-            )
+        ev_session, ev_last_charge, ev_unpaid = self._fetch_eva(session)
+        unread_path = f"{NOTIFICATIONS_PATH}?" + urlencode(
+            {
+                "limit": "1",
+                "include_totals_unread_notifications": "true",
+                "include_notifications": "false",
+            }
         )
         unread = _parse_unread(self._optional_get(session, unread_path))
         bill_delivery = _parse_bill_delivery(
             self._optional_get(session, BILL_PREFERENCES_PATH),
             premise.account_number,
         )
-        fcu = self._fetch_fcu(session, premise.account_number)
-        tariff = self._fetch_tariff(session)
-        return (
-            greenup,
-            ev_wallet,
-            ev_session,
-            ev_last_charge,
-            ev_unpaid,
-            unread,
-            bill_delivery,
-            fcu,
-            tariff,
+        fcus = self._fetch_fcus(session, premise.account_number)
+        tariff = self._fetch_tariff(electricity)
+        return OptionalReads(
+            greenup=greenup,
+            ev_wallet=ev_wallet,
+            ev_session=ev_session,
+            ev_last_charge=ev_last_charge,
+            ev_unpaid=ev_unpaid,
+            unread_notifications=unread,
+            bill_delivery=bill_delivery,
+            fcus=fcus,
+            tariff=tariff,
         )
 
-    def _fetch_fcu(
+    def _fetch_eva(
+        self, session: Session
+    ) -> tuple[EvSessionInfo | None, EvChargeInfo | None, EvUnpaidInfo | None]:
+        response = self._jarvis_get(
+            session,
+            EVA_LATEST_SESSION_PATH,
+            timeout=OPTIONAL_HTTP_TIMEOUT_SECONDS,
+        )
+        if _eva_scope_denied(response):
+            return None, None, None
+        ev_session = _parse_ev_session(_optional_json(response))
+        history_qs = urlencode({"offSet": "0", "pageSize": "5"})
+        history_path = f"{EVA_CHARGE_HISTORY_PATH}?{history_qs}"
+        history_body = self._optional_get(session, history_path)
+        ev_last_charge = _parse_ev_last_charge(history_body)
+        ev_unpaid = _parse_ev_unpaid(self._optional_get(session, EVA_UNPAID_PATH))
+        return ev_session, ev_last_charge, ev_unpaid
+
+    def _fetch_fcus(
         self, session: Session, account_number: str | None
-    ) -> FcuInfo | None:
+    ) -> tuple[FcuInfo, ...]:
         if not account_number:
-            return None
+            return ()
         body = self._optional_post(
             session,
             FROSTY_GRAPHQL_PATH,
@@ -1248,23 +1349,27 @@ class SpGroupClient:
         )
         paired = _parse_paired_fcus(body)
         if not paired:
-            return None
-        thing, display = paired[0]
-        query = urlencode(
-            {"thingName": thing, "utility_acc_id": account_number}
-        )
-        status = self._optional_get(session, f"{FROSTY_FCU_STATUS_PATH}?{query}")
-        return _parse_fcu_status(status, thing, display)
+            return ()
+        out: list[FcuInfo] = []
+        for thing, display in paired:
+            query = urlencode({"thingName": thing, "utility_acc_id": account_number})
+            status = self._optional_get(session, f"{FROSTY_FCU_STATUS_PATH}?{query}")
+            info = _parse_fcu_status(status, thing, display)
+            if info is not None:
+                out.append(info)
+        return tuple(out)
 
-    def _fetch_tariff(self, session: Session) -> TariffInfo | None:
+    def _fetch_tariff(self, electricity: UtilitySeries | None) -> TariffInfo | None:
+        consumption = _tariff_consumption(electricity)
         response = self._transport.request(
             "GET",
-            f"{PUBLIC_HOST}{PRICEPLAN_PATH}?{urlencode({'consumption': '350'})}",
+            f"{PUBLIC_HOST}{PRICEPLAN_PATH}?{urlencode({'consumption': consumption})}",
             {
                 "User-Agent": USER_AGENT,
                 "Accept": "application/json",
             },
             None,
+            timeout=OPTIONAL_HTTP_TIMEOUT_SECONDS,
         )
         body = _optional_json(response)
         if body is None:

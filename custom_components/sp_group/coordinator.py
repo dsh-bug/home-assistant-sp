@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -39,6 +40,12 @@ class SpGroupCoordinator(DataUpdateCoordinator[UsageReadings]):
         )
         self.client = client
         self.entry = entry
+        self._platforms_ready = False
+        self._stats_lock = asyncio.Lock()
+        self._stats_task: asyncio.Task[None] | None = None
+
+    def mark_platforms_ready(self) -> None:
+        self._platforms_ready = True
 
     async def _async_update_data(self) -> UsageReadings:
         try:
@@ -49,29 +56,52 @@ class SpGroupCoordinator(DataUpdateCoordinator[UsageReadings]):
             raise ConfigEntryAuthFailed(str(exc)) from exc
         except UsageError as exc:
             raise UpdateFailed(str(exc)) from exc
-        session = self.client.session
-        if session is not None:
-            data = {
-                CONF_USERNAME: self.entry.data[CONF_USERNAME],
-                CONF_PASSWORD: self.entry.data[CONF_PASSWORD],
-                CONF_ACCESS_TOKEN: session.access_token,
-                CONF_ID_TOKEN: session.id_token,
-            }
-            if session.refresh_token:
-                data[CONF_REFRESH_TOKEN] = session.refresh_token
-            self.hass.config_entries.async_update_entry(self.entry, data=data)
-        self.hass.async_create_task(self.async_import_billed_history())
+        self._persist_session_if_changed()
+        if self._platforms_ready:
+            self._schedule_stats_import()
         return usage
+
+    def _persist_session_if_changed(self) -> None:
+        session = self.client.session
+        if session is None:
+            return
+        data = self.entry.data
+        refresh = session.refresh_token or None
+        stored_refresh = data.get(CONF_REFRESH_TOKEN) or None
+        if (
+            data.get(CONF_ACCESS_TOKEN) == session.access_token
+            and data.get(CONF_ID_TOKEN) == session.id_token
+            and stored_refresh == refresh
+        ):
+            return
+        payload = {
+            CONF_USERNAME: data[CONF_USERNAME],
+            CONF_PASSWORD: data[CONF_PASSWORD],
+            CONF_ACCESS_TOKEN: session.access_token,
+            CONF_ID_TOKEN: session.id_token,
+        }
+        if session.refresh_token:
+            payload[CONF_REFRESH_TOKEN] = session.refresh_token
+        self.hass.config_entries.async_update_entry(self.entry, data=payload)
+
+    def _schedule_stats_import(self) -> None:
+        task = self._stats_task
+        if task is not None and not task.done():
+            return
+        self._stats_task = self.hass.async_create_task(
+            self.async_import_billed_history()
+        )
 
     async def async_import_billed_history(self) -> None:
         """Write billed period totals into recorder long-term statistics."""
-        usage = self.data
-        if usage is None:
-            return
-        try:
-            await self._async_import_billed_history(usage)
-        except Exception:
-            _LOGGER.exception("failed to import billed statistics")
+        async with self._stats_lock:
+            usage = self.data
+            if usage is None:
+                return
+            try:
+                await self._async_import_billed_history(usage)
+            except Exception:
+                _LOGGER.exception("failed to import billed statistics")
 
     def _history_series(
         self, usage: UsageReadings

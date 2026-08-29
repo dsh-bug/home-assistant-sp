@@ -12,7 +12,7 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfEnergy, UnitOfVolume
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -45,17 +45,29 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: SpGroupCoordinator = entry.runtime_data
-    usage = coordinator.data
-    specs = sensors_from_usage(usage)
-    if not specs:
-        return
-    async_add_entities([SpGroupSensor(coordinator, spec.key) for spec in specs])
+    known: set[str] = set()
+
+    @callback
+    def _async_add_new() -> None:
+        specs = sensors_from_usage(coordinator.data)
+        fresh = [spec for spec in specs if spec.key not in known]
+        if not fresh:
+            return
+        known.update(spec.key for spec in fresh)
+        async_add_entities([SpGroupSensor(coordinator, spec.key) for spec in fresh])
+
+    _async_add_new()
+    entry.async_on_unload(coordinator.async_add_listener(_async_add_new))
 
 
 class SpGroupSensor(SpGroupEntity, SensorEntity):
     def __init__(self, coordinator: SpGroupCoordinator, key: str) -> None:
         super().__init__(coordinator, key)
         spec = self._current_spec()
+        if spec is not None:
+            self._attr_translation_key = spec.translation_key
+            if spec.name:
+                self._attr_name = spec.name
         device_class = _DEVICE_CLASS.get(spec.device_class) if spec else None
         state_class = None
         if spec is not None and spec.state_class:

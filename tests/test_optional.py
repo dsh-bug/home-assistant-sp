@@ -6,6 +6,7 @@ import json
 
 from custom_components.sp_group.client import (
     SpGroupClient,
+    _eva_sgd,
     _parse_bill_delivery,
     _parse_ev_last_charge,
     _parse_ev_session,
@@ -15,11 +16,15 @@ from custom_components.sp_group.client import (
     _parse_greenup,
     _parse_paired_fcus,
     _parse_unread,
+    _tariff_consumption,
 )
 from custom_components.sp_group.const import (
+    EVA_LATEST_SESSION_PATH,
+    OPTIONAL_HTTP_TIMEOUT_SECONDS,
     SENSOR_KEY_EV_LAST_CHARGE,
     SENSOR_KEY_GREENUP_POINTS,
     SENSOR_KEY_UNREAD_NOTIFICATIONS,
+    TARIFF_DEFAULT_CONSUMPTION_KWH,
 )
 from custom_components.sp_group.mapper import sensors_from_usage
 
@@ -28,7 +33,7 @@ from .conftest import FixtureTransport
 
 def test_greenup_and_unread_appear_when_payloads_exist() -> None:
     class ExtraTransport(FixtureTransport):
-        def request(self, method, url, headers, body):
+        def request(self, method, url, headers, body, *, timeout=None):
             from urllib.parse import urlparse
 
             from custom_components.sp_group.client import HttpResponse
@@ -58,10 +63,7 @@ def test_greenup_and_unread_appear_when_payloads_exist() -> None:
                         }
                     ).encode(),
                 )
-            if (
-                method == "GET"
-                and parsed.path == "/notifications/v1/notifications"
-            ):
+            if method == "GET" and parsed.path == "/notifications/v1/notifications":
                 return HttpResponse(
                     200,
                     {"Content-Type": "application/json"},
@@ -85,7 +87,7 @@ def test_greenup_and_unread_appear_when_payloads_exist() -> None:
                         }
                     ).encode(),
                 )
-            return super().request(method, url, headers, body)
+            return super().request(method, url, headers, body, timeout=timeout)
 
     usage = SpGroupClient(
         "user@example.com", "secret", transport=ExtraTransport()
@@ -108,11 +110,139 @@ def test_empty_optional_payloads_are_skipped() -> None:
     assert _parse_ev_unpaid({"data": {"orders": []}}) is None
     assert _parse_unread({}) is None
     assert _parse_bill_delivery({"preferences": []}, "1") is None
-    paired = _parse_paired_fcus(
-        {"errors": [{"message": "Unauthorized"}], "data": None}
-    )
+    paired = _parse_paired_fcus({"errors": [{"message": "Unauthorized"}], "data": None})
     assert paired == []
     assert _parse_greenup({"data": {"account": None}}) is None
-    assert (
-        _parse_fcu_status({"fcu_not_paired": True}, "thing", "Living") is None
+    assert _parse_fcu_status({"fcu_not_paired": True}, "thing", "Living") is None
+
+
+def test_eva_sgd_string_rules() -> None:
+    assert _eva_sgd("12.30") == 12.3
+    assert _eva_sgd("1230") == 12.3
+    assert _eva_sgd(1230) == 12.3
+    assert _eva_sgd(12.3) == 12.3
+    assert _eva_sgd("50") == 50.0
+    assert _eva_sgd(50) == 50.0
+    assert _eva_sgd(None) is None
+    assert _eva_sgd("") is None
+    unpaid = _parse_ev_unpaid({"data": {"orders": [{"amount": "1850"}]}})
+    assert unpaid is not None
+    assert unpaid.amount == 18.5
+    charge = _parse_ev_last_charge(
+        {"data": [{"total_consumption": 1.2, "transaction_amount": "12.50"}]}
     )
+    assert charge is not None
+    assert charge.amount == 12.5
+
+
+def test_eva_scope_not_found_skips_remaining_eva() -> None:
+    class DeniedEva(FixtureTransport):
+        def request(self, method, url, headers, body, *, timeout=None):
+            from urllib.parse import urlparse
+
+            from custom_components.sp_group.client import HttpResponse
+
+            parsed = urlparse(url)
+            if parsed.path.startswith("/eva/"):
+                if parsed.path == EVA_LATEST_SESSION_PATH:
+                    return HttpResponse(
+                        403,
+                        {"Content-Type": "application/json"},
+                        b'{"error":"scope_not_found"}',
+                    )
+                raise AssertionError(f"eva call after deny: {parsed.path}")
+            return super().request(method, url, headers, body, timeout=timeout)
+
+    usage = SpGroupClient(
+        "user@example.com", "secret", transport=DeniedEva()
+    ).fetch_usage()
+    assert usage.ev_session is None
+    assert usage.ev_last_charge is None
+    assert usage.ev_unpaid is None
+
+
+def test_optional_calls_use_short_timeout() -> None:
+    transport = FixtureTransport()
+    SpGroupClient("user@example.com", "secret", transport=transport).fetch_usage()
+    eva = [
+        req
+        for req in transport.requests
+        if "/eva/" in req.url or "/1up/" in req.url or "/frosty/" in req.url
+    ]
+    assert eva
+    assert all(req.timeout == OPTIONAL_HTTP_TIMEOUT_SECONDS for req in eva)
+    me = next(req for req in transport.requests if req.url.endswith("/jarvis/v3/me"))
+    assert me.timeout == 30
+
+
+def test_paired_fcus_each_get_a_sensor() -> None:
+    class TwoFcu(FixtureTransport):
+        def request(self, method, url, headers, body, *, timeout=None):
+            from urllib.parse import parse_qs, urlparse
+
+            from custom_components.sp_group.client import HttpResponse
+
+            parsed = urlparse(url)
+            if method == "POST" and parsed.path == "/frosty/graphql":
+                return HttpResponse(
+                    200,
+                    {"Content-Type": "application/json"},
+                    json.dumps(
+                        {
+                            "data": {
+                                "getPairedFCUs": [
+                                    {
+                                        "displayName": "Living",
+                                        "thingName": "tengah-living",
+                                    },
+                                    {
+                                        "displayName": "Bedroom",
+                                        "thingName": "tengah-bed",
+                                    },
+                                ]
+                            }
+                        }
+                    ).encode(),
+                )
+            if method == "GET" and parsed.path == "/frosty/fcu_status":
+                thing = parse_qs(parsed.query).get("thingName", [""])[0]
+                temp = 24.5 if thing == "tengah-living" else 22.0
+                return HttpResponse(
+                    200,
+                    {"Content-Type": "application/json"},
+                    json.dumps(
+                        {
+                            "is_on": True,
+                            "is_online": True,
+                            "room_temperature": temp,
+                            "temperature": 25,
+                            "operation_mode": "cool",
+                        }
+                    ).encode(),
+                )
+            return super().request(method, url, headers, body, timeout=timeout)
+
+    usage = SpGroupClient(
+        "user@example.com", "secret", transport=TwoFcu()
+    ).fetch_usage()
+    assert len(usage.fcus) == 2
+    by_key = {spec.key: spec for spec in sensors_from_usage(usage)}
+    living = by_key["fcu_tengah_living"]
+    bed = by_key["fcu_tengah_bed"]
+    assert living.native_value == 24.5
+    assert living.name == "Living"
+    assert bed.native_value == 22.0
+    assert bed.name == "Bedroom"
+
+
+def test_tariff_consumption_from_last_billed_kwh() -> None:
+    transport = FixtureTransport()
+    SpGroupClient("user@example.com", "secret", transport=transport).fetch_usage()
+    urls = [req.url for req in transport.requests if "priceplan" in req.url]
+    assert urls
+    assert "consumption=142" in urls[0]
+    gas = FixtureTransport(charts_fixture="jarvis_charts_gas.json")
+    SpGroupClient("user@example.com", "secret", transport=gas).fetch_usage()
+    gas_urls = [req.url for req in gas.requests if "priceplan" in req.url]
+    assert f"consumption={TARIFF_DEFAULT_CONSUMPTION_KWH}" in gas_urls[0]
+    assert _tariff_consumption(None) == str(TARIFF_DEFAULT_CONSUMPTION_KWH)

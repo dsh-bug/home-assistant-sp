@@ -31,7 +31,15 @@ async def _validate(
     hass: HomeAssistant, username: str, password: str
 ) -> dict[str, str]:
     client = SpGroupClient(username=username, password=password)
-    session = await hass.async_add_executor_job(client.login)
+
+    def _login_and_fetch() -> None:
+        client.login()
+        client.fetch_usage()
+
+    await hass.async_add_executor_job(_login_and_fetch)
+    session = client.session
+    if session is None:
+        raise UsageError("session missing after login")
     data = {
         CONF_USERNAME: username,
         CONF_PASSWORD: password,

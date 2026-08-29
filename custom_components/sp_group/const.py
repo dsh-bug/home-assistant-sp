@@ -59,6 +59,11 @@ HEADER_ID_TOKEN = "X-id-token"
 CONTENT_TYPE_JSON = "application/json; charset=utf-8"
 ACCEPT_LANGUAGE = "en_US"
 
+HTTP_TIMEOUT_SECONDS = 30
+OPTIONAL_HTTP_TIMEOUT_SECONDS = 8
+TARIFF_DEFAULT_CONSUMPTION_KWH = 350
+EVA_INTEGER_CENTS_MIN = 100
+
 UPDATE_INTERVAL = timedelta(minutes=30)
 
 DEVICE_CLASS_ENERGY = "energy"
@@ -79,6 +84,8 @@ SENSOR_KEY_ELECTRICITY_LAST = "electricity_last_period"
 SENSOR_KEY_WATER_LAST = "water_last_period"
 SENSOR_KEY_GAS_LAST = "gas_last_period"
 SENSOR_KEY_ELECTRICITY_TODAY = "electricity_today"
+# Unique id suffix stays electricity_last_hour so existing entities keep their
+# id. The translated name is the last published 30-minute AMI slot.
 SENSOR_KEY_ELECTRICITY_HOUR = "electricity_last_hour"
 SENSOR_KEY_ACCOUNT = "account"
 SENSOR_KEY_PPMS = "ppms_credit"

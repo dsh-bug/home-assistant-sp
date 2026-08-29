@@ -216,6 +216,8 @@ def test_me_forbidden_uses_server_error_description() -> None:
             url: str,
             headers: dict[str, str],
             body: bytes | None,
+            *,
+            timeout: int | None = None,
         ):
             from urllib.parse import urlparse
 
@@ -228,7 +230,7 @@ def test_me_forbidden_uses_server_error_description() -> None:
                     {"Content-Type": "application/json"},
                     b'{"error":"invalid_claim","error_description":"claim error"}',
                 )
-            return super().request(method, url, headers, body)
+            return super().request(method, url, headers, body, timeout=timeout)
 
     client = SpGroupClient(
         "user@example.com", "secret", transport=ForbiddenMeTransport()
@@ -280,7 +282,7 @@ def test_gas_only_charts_return_gas_series() -> None:
 
 def test_amount_due_credit_is_negative_sgd() -> None:
     class CreditTransport(FixtureTransport):
-        def request(self, method, url, headers, body):
+        def request(self, method, url, headers, body, *, timeout=None):
             from urllib.parse import urlparse
 
             from custom_components.sp_group.client import HttpResponse
@@ -295,7 +297,7 @@ def test_amount_due_credit_is_negative_sgd() -> None:
                     b'"recurring_enabled":false,"giro_enabled":false,'
                     b'"is_owner":true}]}',
                 )
-            return super().request(method, url, headers, body)
+            return super().request(method, url, headers, body, timeout=timeout)
 
     usage = SpGroupClient(
         "user@example.com", "secret", transport=CreditTransport()

@@ -35,6 +35,7 @@ class RecordedRequest:
     url: str
     headers: dict[str, str]
     body: bytes | None
+    timeout: int | None = None
 
 
 @dataclass
@@ -53,9 +54,17 @@ class FixtureTransport:
         url: str,
         headers: Mapping[str, str],
         body: bytes | None,
+        *,
+        timeout: int | None = None,
     ) -> HttpResponse:
         self.requests.append(
-            RecordedRequest(method=method, url=url, headers=dict(headers), body=body)
+            RecordedRequest(
+                method=method,
+                url=url,
+                headers=dict(headers),
+                body=body,
+                timeout=timeout,
+            )
         )
         parsed = urlparse(url)
         origin = f"{parsed.scheme}://{parsed.netloc}"
