@@ -12,6 +12,7 @@ from custom_components.sp_group.history import (
     cumulative_points,
     fold_half_hours,
     merge_ami_periods,
+    monthly_bill_points,
     trim_unreported,
 )
 from custom_components.sp_group.mapper import electricity_graph_periods
@@ -57,6 +58,20 @@ def test_trim_unreported_drops_trailing_zeros() -> None:
     )
     assert len(trimmed) == 2
     assert trimmed[-1].amount == pytest.approx(0.7)
+
+
+def test_monthly_bill_points_one_per_month() -> None:
+    client = SpGroupClient("user@example.com", "secret", transport=FixtureTransport())
+    usage = client.fetch_usage()
+    points = monthly_bill_points(usage.bills)
+    assert len(points) == 2
+    assert points[0].amount == pytest.approx(323.26)
+    assert points[1].amount == pytest.approx(203.69)
+    assert points[0].start.tzinfo is not None
+    assert points[0].start.hour == 16
+    assert points[0].start.minute == 0
+    assert points[0].start.month == 6
+    assert points[1].start.month == 7
 
 
 def test_fold_half_hours_sums_clock_hour() -> None:

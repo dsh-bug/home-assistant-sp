@@ -39,6 +39,7 @@ from .const import (
     SENSOR_KEY_WATER_LAST,
     SENSOR_KEY_WATER_METER,
     STATE_CLASS_MEASUREMENT,
+    STATE_CLASS_TOTAL,
     STATE_CLASS_TOTAL_INCREASING,
     UNIT_KWH,
     UNIT_M3,
@@ -160,6 +161,7 @@ def extra_attributes(usage: UsageReadings, key: str) -> dict[str, object]:
             attrs["bill_period"] = bill.period
             attrs["due_date"] = bill.due_date
             attrs["bill_account_number"] = bill.account_number
+            attrs["bill_count"] = len(usage.bills)
         return _omit_none(attrs)
     if key == SENSOR_KEY_AMOUNT_DUE:
         due = usage.amount_due
@@ -418,7 +420,7 @@ def sensors_from_usage(usage: UsageReadings | None) -> list[SensorSpec]:
                 translation_key=SENSOR_KEY_LAST_BILL,
                 native_value=usage.last_bill.amount_sgd,
                 device_class=DEVICE_CLASS_MONETARY,
-                state_class=None,
+                state_class=STATE_CLASS_TOTAL,
                 unit_of_measurement=UNIT_SGD,
                 suggested_display_precision=2,
             )

@@ -178,6 +178,9 @@ def test_fetch_usage_returns_kwh_and_water_from_charts_fixture() -> None:
     assert usage.last_bill is not None
     assert usage.last_bill.amount_sgd == pytest.approx(203.69)
     assert usage.last_bill.period == "2026-07-31T16:00:00Z"
+    assert len(usage.bills) == 2
+    assert usage.bills[0].amount_sgd == pytest.approx(323.26)
+    assert usage.bills[-1].amount_sgd == pytest.approx(203.69)
     assert usage.amount_due is not None
     assert usage.amount_due.amount_sgd == pytest.approx(203.69)
     assert any(

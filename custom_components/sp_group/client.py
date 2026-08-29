@@ -205,6 +205,7 @@ class BillInfo:
     period: str | None
     due_date: str | None
     account_number: str | None
+    issued_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -322,6 +323,7 @@ class UsageReadings:
     ami_hourly: tuple[PeriodReading, ...] = ()
     ami_daily: tuple[PeriodReading, ...] = ()
     last_bill: BillInfo | None = None
+    bills: tuple[BillInfo, ...] = ()
     amount_due: PayableInfo | None = None
     meter_registers: tuple[MeterRegister, ...] = ()
     green_goals: tuple[GreenGoal, ...] = ()
@@ -976,13 +978,13 @@ def _parse_tariff(body: object) -> TariffInfo | None:
     )
 
 
-def _parse_last_bill(body: object) -> BillInfo | None:
+def _parse_bills(body: object) -> tuple[BillInfo, ...]:
     if not isinstance(body, dict):
-        return None
+        return ()
     history = body.get("history")
     if not isinstance(history, list):
-        return None
-    latest: tuple[str, BillInfo] | None = None
+        return ()
+    bills: list[tuple[str, BillInfo]] = []
     for row in history:
         if not isinstance(row, dict):
             continue
@@ -994,17 +996,23 @@ def _parse_last_bill(body: object) -> BillInfo | None:
         amount = _cents_to_sgd(bill.get("amount"))
         if amount is None:
             continue
+        date = _optional_str(bill.get("date"))
+        period = _optional_str(bill.get("period"))
+        created = _optional_str(row.get("created_at"))
         info = BillInfo(
             amount_sgd=amount,
-            date=_optional_str(bill.get("date")),
-            period=_optional_str(bill.get("period")),
+            date=date,
+            period=period,
             due_date=_optional_str(bill.get("due_date")),
             account_number=_optional_str(bill.get("account_number")),
+            issued_at=_parse_period_start(date)
+            or _parse_period_start(period)
+            or _parse_period_start(created),
         )
-        stamp = _optional_str(row.get("created_at")) or info.date or ""
-        if latest is None or stamp > latest[0]:
-            latest = (stamp, info)
-    return latest[1] if latest is not None else None
+        stamp = created or date or ""
+        bills.append((stamp, info))
+    bills.sort(key=lambda item: item[0])
+    return tuple(info for _, info in bills)
 
 
 def _parse_payable(
@@ -1228,7 +1236,8 @@ class SpGroupClient:
         meter_reading, meter_registers = self._fetch_meter_reading(session, info.id)
         ppms_credit, ppms_updated = self._fetch_ppms(session, info)
         ami_hourly, ami_daily = self._fetch_ami(session, info)
-        last_bill = self._fetch_last_bill(session, info.account_number)
+        bills = self._fetch_bills(session, info.account_number)
+        last_bill = bills[-1] if bills else None
         amount_due = self._fetch_amount_due(session, info)
         green_goals = self._fetch_green_goals(session, info.id)
         extras = self._fetch_optional(session, info, electricity)
@@ -1243,6 +1252,7 @@ class SpGroupClient:
             ami_hourly=ami_hourly,
             ami_daily=ami_daily,
             last_bill=last_bill,
+            bills=bills,
             amount_due=amount_due,
             meter_registers=meter_registers,
             green_goals=green_goals,
@@ -1394,20 +1404,20 @@ class SpGroupClient:
         updated = _optional_str(body.get("updated_at"))
         return amount, updated
 
-    def _fetch_last_bill(
+    def _fetch_bills(
         self, session: Session, account_number: str | None
-    ) -> BillInfo | None:
+    ) -> tuple[BillInfo, ...]:
         if not account_number:
-            return None
+            return ()
         query = urlencode({"account_numbers": account_number})
         response = self._jarvis_get(session, f"{NJORD_HISTORY_PATH}?{query}")
         if response.status >= 400:
-            return None
+            return ()
         try:
             body = _decode_json(response.body)
         except (json.JSONDecodeError, UnicodeDecodeError):
-            return None
-        return _parse_last_bill(body)
+            return ()
+        return _parse_bills(body)
 
     def _fetch_amount_due(
         self, session: Session, premise: PremiseInfo

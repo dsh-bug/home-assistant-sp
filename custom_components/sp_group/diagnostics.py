@@ -42,6 +42,7 @@ async def async_get_config_entry_diagnostics(
         "gas_periods": len(usage.gas_periods),
         "has_meter_reading": usage.meter_reading is not None,
         "has_last_bill": usage.last_bill is not None,
+        "bill_count": len(usage.bills),
         "has_amount_due": usage.amount_due is not None,
         "meter_register_count": len(usage.meter_registers),
         "green_goal_kinds": [goal.kind for goal in usage.green_goals],

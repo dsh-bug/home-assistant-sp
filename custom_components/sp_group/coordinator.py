@@ -21,7 +21,9 @@ from .const import (
     DOMAIN,
     SENSOR_KEY_ELECTRICITY,
     SENSOR_KEY_GAS,
+    SENSOR_KEY_LAST_BILL,
     UNIT_KWH,
+    UNIT_SGD,
     UPDATE_INTERVAL,
 )
 
@@ -137,7 +139,7 @@ class SpGroupCoordinator(DataUpdateCoordinator[UsageReadings]):
         from homeassistant.components.recorder.statistics import async_import_statistics
         from homeassistant.helpers import entity_registry as er
 
-        from .history import cumulative_points
+        from .history import cumulative_points, monthly_bill_points
 
         registry = er.async_get(self.hass)
         for key, periods, unit, unit_class in self._history_series(usage):
@@ -165,6 +167,29 @@ class SpGroupCoordinator(DataUpdateCoordinator[UsageReadings]):
                     "sum": point.cumulative,
                 }
                 for point in points
+            ]
+            async_import_statistics(self.hass, metadata, stats)
+        bill_id = registry.async_get_entity_id(
+            "sensor", DOMAIN, f"{usage.premise_id}_{SENSOR_KEY_LAST_BILL}"
+        )
+        bill_points = monthly_bill_points(usage.bills)
+        if bill_id is not None and bill_points:
+            metadata = {
+                "has_sum": True,
+                "mean_type": StatisticMeanType.NONE,
+                "name": None,
+                "source": "recorder",
+                "statistic_id": bill_id,
+                "unit_class": None,
+                "unit_of_measurement": UNIT_SGD,
+            }
+            stats = [
+                {
+                    "start": point.start,
+                    "state": point.amount,
+                    "sum": point.amount,
+                }
+                for point in bill_points
             ]
             async_import_statistics(self.hass, metadata, stats)
 

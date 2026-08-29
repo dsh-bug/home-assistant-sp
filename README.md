@@ -15,8 +15,6 @@ Device name in the live UI is the SP premise address. The shots below use a plac
 
 ![Sensors for usage, bill, meters, and Green Goals](images/device.png)
 
-![Last bill](images/last-bill.png)
-
 ## Install
 
 ### HACS
@@ -39,7 +37,7 @@ Copy `custom_components/sp_group` into `<config>/custom_components/sp_group` and
 
 Polls every 30 minutes. After the first successful poll, long-term statistics are written for electricity (and gas when present).
 
-- Grid consumption: `sensor.sp_group_utilities_electricity` only. That series is AMI half-hours folded to clock hours when the premise has `ami_elec`, otherwise billed monthly kWh.
+- Grid consumption: `sensor.sp_group_utilities_electricity` (**Electricity cumulative**) only. That series is AMI half-hours folded to clock hours when the premise has `ami_elec`, otherwise billed monthly kWh. It is the loaded window (~13 months), not today.
 - Do not add **Electricity last billed**, **Electricity meter**, or **Electricity this month** as grid sources. They are a different number: last billed period, the physical register, and Green Goals month-to-date.
 - Leave Water empty in Energy. SP bills water monthly. **Water** is the sum of billed months; **Water meter** is the lifetime register. Neither is an hourly series.
 - Gas: `sensor.sp_group_utilities_gas` only if Jarvis returned billed gas periods.
@@ -54,7 +52,7 @@ Names below are the entity names. Unique id is `{premise_id}_{key}`. Optional ro
 
 | Name | Key | What it is |
 | --- | --- | --- |
-| Electricity | `electricity` | Cumulative kWh, `total_increasing`. AMI when `ami_elec`, else billed months |
+| Electricity cumulative | `electricity` | AMI / billed total for the loaded window (~13 months). Energy grid source. Unique id stays `electricity` |
 | Electricity last billed | `electricity_last_period` | Latest billed month kWh |
 | Electricity today | `electricity_today` | AMI kWh for today in SGT |
 | Electricity last 30 min | `electricity_last_hour` | Last published AMI slot |
@@ -66,7 +64,7 @@ Names below are the entity names. Unique id is `{premise_id}_{key}`. Optional ro
 
 | Name | Key | What it is |
 | --- | --- | --- |
-| Last bill | `last_bill` | Latest Njord bill in SGD (cents / 100) |
+| Last bill | `last_bill` | Latest Njord bill in SGD. History is one point per billed month |
 | Amount due | `amount_due` | Njord payable in SGD. Negative is a credit |
 | Prepaid credit | `ppms_credit` | PPMS SGD when `/me` says a prepaid account exists |
 
