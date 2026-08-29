@@ -75,6 +75,18 @@
       },
       "amount_due": {
         "name": "Amount due"
+      },
+      "electricity_meter": {
+        "name": "Electricity meter"
+      },
+      "water_meter": {
+        "name": "Water meter"
+      },
+      "electricity_goal": {
+        "name": "Electricity this month"
+      },
+      "water_goal": {
+        "name": "Water this month"
       }
     }
   }

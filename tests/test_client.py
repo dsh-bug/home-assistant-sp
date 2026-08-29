@@ -21,6 +21,7 @@ from custom_components.sp_group.const import (
     IDENTITY_HOST,
     JARVIS_AMI_PATH,
     JARVIS_CHARTS_PATH,
+    JARVIS_GREEN_GOALS_PATH,
     JARVIS_ME_PATH,
     NJORD_HISTORY_PATH,
     NJORD_PAYABLES_PATH,
@@ -189,6 +190,22 @@ def test_fetch_usage_returns_kwh_and_water_from_charts_fixture() -> None:
     ]
     assert len(history_reqs) == 1
     assert "account_numbers=1234567890" in history_reqs[0].url
+    elec_meter = usage.meter("electric")
+    water_meter = usage.meter("water")
+    assert elec_meter is not None
+    assert elec_meter.value == pytest.approx(14256)
+    assert elec_meter.meter_id == "PA0000001"
+    assert water_meter is not None
+    assert water_meter.value == pytest.approx(931.4)
+    elec_goal = usage.goal("elec")
+    assert elec_goal is not None
+    assert elec_goal.used == pytest.approx(1160.77)
+    assert elec_goal.target == pytest.approx(672.47)
+    assert elec_goal.cost_difference_sgd == pytest.approx(103.10)
+    assert usage.goal("water") is None
+    assert any(
+        urlparse_path(req.url) == JARVIS_GREEN_GOALS_PATH for req in transport.requests
+    )
 
 
 def test_me_forbidden_uses_server_error_description() -> None:

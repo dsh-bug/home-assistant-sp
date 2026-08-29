@@ -15,15 +15,19 @@ from .const import (
     SENSOR_KEY_ACCOUNT,
     SENSOR_KEY_AMOUNT_DUE,
     SENSOR_KEY_ELECTRICITY,
+    SENSOR_KEY_ELECTRICITY_GOAL,
     SENSOR_KEY_ELECTRICITY_HOUR,
     SENSOR_KEY_ELECTRICITY_LAST,
+    SENSOR_KEY_ELECTRICITY_METER,
     SENSOR_KEY_ELECTRICITY_TODAY,
     SENSOR_KEY_GAS,
     SENSOR_KEY_GAS_LAST,
     SENSOR_KEY_LAST_BILL,
     SENSOR_KEY_PPMS,
     SENSOR_KEY_WATER,
+    SENSOR_KEY_WATER_GOAL,
     SENSOR_KEY_WATER_LAST,
+    SENSOR_KEY_WATER_METER,
     STATE_CLASS_MEASUREMENT,
     STATE_CLASS_TOTAL_INCREASING,
     UNIT_KWH,
@@ -135,6 +139,34 @@ def extra_attributes(usage: UsageReadings, key: str) -> dict[str, object]:
             attrs["currency"] = due.currency
             attrs["giro_enabled"] = due.giro_enabled
             attrs["recurring_enabled"] = due.recurring_enabled
+        return _omit_none(attrs)
+    if key == SENSOR_KEY_ELECTRICITY_METER:
+        meter = usage.meter("electric")
+        if meter is not None:
+            attrs["meter_id"] = meter.meter_id
+            attrs["last_actual_at"] = meter.last_actual_at
+        return _omit_none(attrs)
+    if key == SENSOR_KEY_WATER_METER:
+        meter = usage.meter("water")
+        if meter is not None:
+            attrs["meter_id"] = meter.meter_id
+            attrs["last_actual_at"] = meter.last_actual_at
+        return _omit_none(attrs)
+    if key == SENSOR_KEY_ELECTRICITY_GOAL:
+        goal = usage.goal("elec")
+        if goal is not None:
+            attrs["goal_month"] = goal.month
+            attrs["goal_target"] = goal.target
+            attrs["percent_difference"] = goal.percent_difference
+            attrs["cost_difference_sgd"] = goal.cost_difference_sgd
+        return _omit_none(attrs)
+    if key == SENSOR_KEY_WATER_GOAL:
+        goal = usage.goal("water")
+        if goal is not None:
+            attrs["goal_month"] = goal.month
+            attrs["goal_target"] = goal.target
+            attrs["percent_difference"] = goal.percent_difference
+            attrs["cost_difference_sgd"] = goal.cost_difference_sgd
         return _omit_none(attrs)
     series: UtilitySeries | None
     if key in {
@@ -316,6 +348,58 @@ def sensors_from_usage(usage: UsageReadings | None) -> list[SensorSpec]:
                 device_class=DEVICE_CLASS_MONETARY,
                 state_class=None,
                 unit_of_measurement=UNIT_SGD,
+                suggested_display_precision=2,
+            )
+        )
+    elec_meter = usage.meter("electric")
+    if elec_meter is not None:
+        specs.append(
+            SensorSpec(
+                key=SENSOR_KEY_ELECTRICITY_METER,
+                translation_key=SENSOR_KEY_ELECTRICITY_METER,
+                native_value=elec_meter.value,
+                device_class=DEVICE_CLASS_ENERGY,
+                state_class=STATE_CLASS_TOTAL_INCREASING,
+                unit_of_measurement=UNIT_KWH,
+                suggested_display_precision=0,
+            )
+        )
+    water_meter = usage.meter("water")
+    if water_meter is not None:
+        specs.append(
+            SensorSpec(
+                key=SENSOR_KEY_WATER_METER,
+                translation_key=SENSOR_KEY_WATER_METER,
+                native_value=water_meter.value,
+                device_class=DEVICE_CLASS_WATER,
+                state_class=STATE_CLASS_TOTAL_INCREASING,
+                unit_of_measurement=UNIT_M3,
+                suggested_display_precision=1,
+            )
+        )
+    elec_goal = usage.goal("elec")
+    if elec_goal is not None:
+        specs.append(
+            SensorSpec(
+                key=SENSOR_KEY_ELECTRICITY_GOAL,
+                translation_key=SENSOR_KEY_ELECTRICITY_GOAL,
+                native_value=elec_goal.used,
+                device_class=None,
+                state_class=STATE_CLASS_MEASUREMENT,
+                unit_of_measurement=UNIT_KWH,
+                suggested_display_precision=1,
+            )
+        )
+    water_goal = usage.goal("water")
+    if water_goal is not None:
+        specs.append(
+            SensorSpec(
+                key=SENSOR_KEY_WATER_GOAL,
+                translation_key=SENSOR_KEY_WATER_GOAL,
+                native_value=water_goal.used,
+                device_class=None,
+                state_class=STATE_CLASS_MEASUREMENT,
+                unit_of_measurement=UNIT_M3,
                 suggested_display_precision=2,
             )
         )

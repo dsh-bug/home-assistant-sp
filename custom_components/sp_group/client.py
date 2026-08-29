@@ -38,6 +38,7 @@ from .const import (
     IDENTITY_HOST,
     JARVIS_AMI_PATH,
     JARVIS_CHARTS_PATH,
+    JARVIS_GREEN_GOALS_PATH,
     JARVIS_ME_PATH,
     JARVIS_PPMS_PATH,
     JARVIS_SMRD_PATH,
@@ -179,6 +180,25 @@ class PayableInfo:
 
 
 @dataclass(frozen=True)
+class MeterRegister:
+    utility: str
+    meter_id: str | None
+    value: float
+    last_actual_at: str | None
+
+
+@dataclass(frozen=True)
+class GreenGoal:
+    kind: str
+    month: str | None
+    used: float
+    target: float
+    percent_difference: float | None
+    cost_difference_sgd: float | None
+    unit: str
+
+
+@dataclass(frozen=True)
 class UsageReadings:
     premise: PremiseInfo
     electricity: UtilitySeries | None
@@ -191,6 +211,8 @@ class UsageReadings:
     ami_daily: tuple[PeriodReading, ...] = ()
     last_bill: BillInfo | None = None
     amount_due: PayableInfo | None = None
+    meter_registers: tuple[MeterRegister, ...] = ()
+    green_goals: tuple[GreenGoal, ...] = ()
 
     @property
     def premise_id(self) -> str:
@@ -223,6 +245,18 @@ class UsageReadings:
     @property
     def gas_periods(self) -> tuple[PeriodReading, ...]:
         return self.gas.periods if self.gas else ()
+
+    def meter(self, utility: str) -> MeterRegister | None:
+        for item in self.meter_registers:
+            if item.utility == utility:
+                return item
+        return None
+
+    def goal(self, kind: str) -> GreenGoal | None:
+        for item in self.green_goals:
+            if item.kind == kind:
+                return item
+        return None
 
 
 def _decode_json(body: bytes) -> object:
@@ -462,6 +496,88 @@ def _parse_meter_reading(body: object) -> MeterReadingInfo | None:
     return info
 
 
+def _parse_meter_registers(body: object) -> tuple[MeterRegister, ...]:
+    if not isinstance(body, dict):
+        return ()
+    rows = body.get("meters")
+    if not isinstance(rows, list):
+        return ()
+    registers: list[MeterRegister] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        utility = _optional_str(row.get("utility_type"))
+        value = _optional_float(row.get("last_actual_value"))
+        if not utility or value is None:
+            continue
+        registers.append(
+            MeterRegister(
+                utility=utility,
+                meter_id=_optional_str(row.get("meter_id")),
+                value=value,
+                last_actual_at=_optional_str(row.get("last_actual_at")),
+            )
+        )
+    return tuple(registers)
+
+
+def _parse_green_goals(body: object, premise_id: str) -> tuple[GreenGoal, ...]:
+    if not isinstance(body, dict):
+        return ()
+    rows = body.get("goals")
+    if not isinstance(rows, list):
+        return ()
+    goals: list[GreenGoal] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        kind = _optional_str(row.get("type"))
+        if not kind:
+            continue
+        premises = row.get("premises")
+        if not isinstance(premises, list):
+            continue
+        matched: dict[str, object] | None = None
+        for premise in premises:
+            if not isinstance(premise, dict):
+                continue
+            if str(premise.get("id")) == premise_id:
+                matched = premise
+                break
+        if matched is None and premises and isinstance(premises[0], dict):
+            matched = premises[0]
+        if matched is None:
+            continue
+        data = matched.get("data")
+        data_map = data if isinstance(data, dict) else {}
+        used = _optional_float(data_map.get("used"))
+        target = _optional_float(data_map.get("target"))
+        if used is None or target is None:
+            continue
+        if used == 0.0 and target == 0.0:
+            continue
+        unit = _optional_str(row.get("unit")) or ("kWh" if kind == "elec" else "m³")
+        if kind == "water":
+            unit = _normalize_volume_unit(unit)
+        cost_cents = _optional_float(matched.get("cost_difference_in_cents"))
+        goals.append(
+            GreenGoal(
+                kind=kind,
+                month=_optional_str(row.get("month")),
+                used=used,
+                target=target,
+                percent_difference=_optional_float(
+                    matched.get("consumption_percentage_difference")
+                ),
+                cost_difference_sgd=(
+                    round(cost_cents / 100.0, 2) if cost_cents is not None else None
+                ),
+                unit=unit,
+            )
+        )
+    return tuple(goals)
+
+
 def _parse_last_bill(body: object) -> BillInfo | None:
     if not isinstance(body, dict):
         return None
@@ -685,11 +801,12 @@ class SpGroupClient:
         gas = _parse_utility(charts.get("gas"), "gas")
         if electricity is None and water is None and gas is None:
             raise UsageError("no billed utilities")
-        meter_reading = self._fetch_meter_reading(session, info.id)
+        meter_reading, meter_registers = self._fetch_meter_reading(session, info.id)
         ppms_credit, ppms_updated = self._fetch_ppms(session, info)
         ami_hourly, ami_daily = self._fetch_ami(session, info)
         last_bill = self._fetch_last_bill(session, info.account_number)
         amount_due = self._fetch_amount_due(session, info)
+        green_goals = self._fetch_green_goals(session, info.id)
         return UsageReadings(
             premise=info,
             electricity=electricity,
@@ -702,19 +819,33 @@ class SpGroupClient:
             ami_daily=ami_daily,
             last_bill=last_bill,
             amount_due=amount_due,
+            meter_registers=meter_registers,
+            green_goals=green_goals,
         )
 
     def _fetch_meter_reading(
         self, session: Session, premise_id: str
-    ) -> MeterReadingInfo | None:
+    ) -> tuple[MeterReadingInfo | None, tuple[MeterRegister, ...]]:
         response = self._jarvis_get(session, f"{JARVIS_SMRD_PATH}/{premise_id}")
         if response.status >= 400:
-            return None
+            return None, ()
         try:
             body = _decode_json(response.body)
         except (json.JSONDecodeError, UnicodeDecodeError):
-            return None
-        return _parse_meter_reading(body)
+            return None, ()
+        return _parse_meter_reading(body), _parse_meter_registers(body)
+
+    def _fetch_green_goals(
+        self, session: Session, premise_id: str
+    ) -> tuple[GreenGoal, ...]:
+        response = self._jarvis_get(session, JARVIS_GREEN_GOALS_PATH)
+        if response.status >= 400:
+            return ()
+        try:
+            body = _decode_json(response.body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return ()
+        return _parse_green_goals(body, premise_id)
 
     def _fetch_ppms(
         self, session: Session, premise: PremiseInfo

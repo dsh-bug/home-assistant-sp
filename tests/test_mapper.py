@@ -15,11 +15,15 @@ from custom_components.sp_group.const import (
     SENSOR_KEY_ACCOUNT,
     SENSOR_KEY_AMOUNT_DUE,
     SENSOR_KEY_ELECTRICITY,
+    SENSOR_KEY_ELECTRICITY_GOAL,
     SENSOR_KEY_ELECTRICITY_LAST,
+    SENSOR_KEY_ELECTRICITY_METER,
     SENSOR_KEY_GAS,
     SENSOR_KEY_LAST_BILL,
     SENSOR_KEY_WATER,
+    SENSOR_KEY_WATER_GOAL,
     SENSOR_KEY_WATER_LAST,
+    SENSOR_KEY_WATER_METER,
     STATE_CLASS_MEASUREMENT,
     STATE_CLASS_TOTAL_INCREASING,
     UNIT_KWH,
@@ -87,6 +91,17 @@ def test_sensors_match_energy_dashboard_contract() -> None:
     amount_due = by_key[SENSOR_KEY_AMOUNT_DUE]
     assert amount_due.native_value == pytest.approx(203.69)
     assert amount_due.device_class == DEVICE_CLASS_MONETARY
+    elec_meter = by_key[SENSOR_KEY_ELECTRICITY_METER]
+    assert elec_meter.native_value == pytest.approx(14256)
+    assert elec_meter.state_class == STATE_CLASS_TOTAL_INCREASING
+    water_meter = by_key[SENSOR_KEY_WATER_METER]
+    assert water_meter.native_value == pytest.approx(931.4)
+    goal = by_key[SENSOR_KEY_ELECTRICITY_GOAL]
+    assert goal.native_value == pytest.approx(1160.77)
+    goal_attrs = extra_attributes(usage, SENSOR_KEY_ELECTRICITY_GOAL)
+    assert goal_attrs["goal_target"] == pytest.approx(672.47)
+    assert goal_attrs["cost_difference_sgd"] == pytest.approx(103.10)
+    assert SENSOR_KEY_WATER_GOAL not in by_key
 
 
 def test_gas_only_charts_yield_gas_sensors() -> None:

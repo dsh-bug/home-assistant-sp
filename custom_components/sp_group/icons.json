@@ -27,6 +27,18 @@
       },
       "amount_due": {
         "default": "mdi:cash-clock"
+      },
+      "electricity_meter": {
+        "default": "mdi:gauge"
+      },
+      "water_meter": {
+        "default": "mdi:counter"
+      },
+      "electricity_goal": {
+        "default": "mdi:target"
+      },
+      "water_goal": {
+        "default": "mdi:target-account"
       }
     }
   }
