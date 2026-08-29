@@ -2,5 +2,6 @@
   "name": "SP Group",
   "homeassistant": "2024.8.0",
   "render_readme": true,
+  "hide_default_branch": true,
   "country": ["SG"]
 }
