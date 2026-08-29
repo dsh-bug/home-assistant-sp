@@ -7,6 +7,16 @@ Unofficial HACS integration for Singapore Power e-accounts. It polls the same Au
 
 Not affiliated with SP Group.
 
+## Screenshots
+
+Device name in the live UI is the SP premise address. The shots below use a placeholder.
+
+![SP Group custom integration](images/integration.png)
+
+![Sensors for usage, bill, meters, and Green Goals](images/device.png)
+
+![Last bill](images/last-bill.png)
+
 ## Install
 
 ### HACS
