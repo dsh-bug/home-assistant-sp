@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from .client import SG_TZ, PeriodReading
+from .client import SG_TZ, BillInfo, PeriodReading
 
 
 @dataclass(frozen=True)
@@ -55,6 +55,24 @@ def fold_half_hours(
     return tuple(
         PeriodReading(start=start, amount=amount)
         for start, amount in sorted(buckets.items())
+    )
+
+
+def monthly_bill_points(
+    bills: tuple[BillInfo, ...] | list[BillInfo],
+) -> tuple[PeriodReading, ...]:
+    """One point per calendar month in SGT, using the issued bill amount."""
+    by_month: dict[datetime, float] = {}
+    for bill in bills:
+        if bill.issued_at is None:
+            continue
+        month = bill.issued_at.astimezone(SG_TZ).replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
+        )
+        by_month[month.astimezone(UTC)] = bill.amount_sgd
+    return tuple(
+        PeriodReading(start=start, amount=amount)
+        for start, amount in sorted(by_month.items())
     )
 
 

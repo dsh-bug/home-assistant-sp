@@ -30,6 +30,7 @@ _DEVICE_CLASS = {
 }
 _STATE_CLASS = {
     "total_increasing": SensorStateClass.TOTAL_INCREASING,
+    "total": SensorStateClass.TOTAL,
     "measurement": SensorStateClass.MEASUREMENT,
 }
 _UNITS = {

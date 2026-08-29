@@ -25,6 +25,7 @@ from custom_components.sp_group.const import (
     SENSOR_KEY_WATER_LAST,
     SENSOR_KEY_WATER_METER,
     STATE_CLASS_MEASUREMENT,
+    STATE_CLASS_TOTAL,
     STATE_CLASS_TOTAL_INCREASING,
     UNIT_KWH,
     UNIT_M3,
@@ -82,9 +83,10 @@ def test_sensors_match_energy_dashboard_contract() -> None:
     last_bill = by_key[SENSOR_KEY_LAST_BILL]
     assert last_bill.native_value == pytest.approx(203.69)
     assert last_bill.device_class == DEVICE_CLASS_MONETARY
-    assert last_bill.state_class is None
+    assert last_bill.state_class == STATE_CLASS_TOTAL
     assert last_bill.unit_of_measurement == UNIT_SGD
     bill_attrs = extra_attributes(usage, SENSOR_KEY_LAST_BILL)
+    assert bill_attrs["bill_count"] == 2
     assert bill_attrs["bill_date"] == "2026-08-03T16:00:00Z"
     assert bill_attrs["due_date"] == "2026-08-17T16:00:00Z"
     assert "pdf_url" not in bill_attrs

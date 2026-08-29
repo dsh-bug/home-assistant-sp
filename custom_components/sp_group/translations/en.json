@@ -41,7 +41,7 @@
   "entity": {
     "sensor": {
       "electricity": {
-        "name": "Electricity"
+        "name": "Electricity cumulative"
       },
       "water": {
         "name": "Water"
