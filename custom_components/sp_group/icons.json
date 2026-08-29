@@ -39,6 +39,33 @@
       },
       "water_goal": {
         "default": "mdi:target-account"
+      },
+      "greenup_points": {
+        "default": "mdi:leaf"
+      },
+      "ev_wallet": {
+        "default": "mdi:ev-station"
+      },
+      "ev_session": {
+        "default": "mdi:ev-plug-type2"
+      },
+      "ev_last_charge": {
+        "default": "mdi:battery-charging"
+      },
+      "ev_unpaid": {
+        "default": "mdi:cash-remove"
+      },
+      "unread_notifications": {
+        "default": "mdi:bell-badge-outline"
+      },
+      "bill_delivery": {
+        "default": "mdi:email-outline"
+      },
+      "fcu": {
+        "default": "mdi:air-conditioner"
+      },
+      "tariff": {
+        "default": "mdi:tag-outline"
       }
     }
   }

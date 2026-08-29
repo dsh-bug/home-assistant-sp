@@ -87,6 +87,33 @@
       },
       "water_goal": {
         "name": "Water this month"
+      },
+      "greenup_points": {
+        "name": "GreenUP points"
+      },
+      "ev_wallet": {
+        "name": "EV wallet"
+      },
+      "ev_session": {
+        "name": "EV session"
+      },
+      "ev_last_charge": {
+        "name": "EV last charge"
+      },
+      "ev_unpaid": {
+        "name": "EV unpaid"
+      },
+      "unread_notifications": {
+        "name": "Unread notifications"
+      },
+      "bill_delivery": {
+        "name": "Bill delivery"
+      },
+      "fcu": {
+        "name": "FCU"
+      },
+      "tariff": {
+        "name": "SP tariff"
       }
     }
   }

@@ -33,7 +33,14 @@ from .const import (
     AUTH0_REFRESH_GRANT,
     AUTH0_SCOPE,
     B2C_HOST,
+    BILL_PREFERENCES_PATH,
     CONTENT_TYPE_JSON,
+    EVA_CHARGE_HISTORY_PATH,
+    EVA_LATEST_SESSION_PATH,
+    EVA_UNPAID_PATH,
+    FROSTY_FCU_STATUS_PATH,
+    FROSTY_GRAPHQL_PATH,
+    GREENUP_GRAPHQL_PATH,
     HEADER_ID_TOKEN,
     IDENTITY_HOST,
     JARVIS_AMI_PATH,
@@ -44,9 +51,23 @@ from .const import (
     JARVIS_SMRD_PATH,
     NJORD_HISTORY_PATH,
     NJORD_PAYABLES_PATH,
+    NOTIFICATIONS_PATH,
     OAUTH_TOKEN_PATH,
+    PRICEPLAN_PATH,
+    PUBLIC_HOST,
     TOKEN_EXPIRY_BUFFER_SECONDS,
+    TYCHE_WALLET_PATH,
     USER_AGENT,
+)
+
+GREENUP_ACCOUNT_QUERY = (
+    "query { account { node { totalPoints projectedLevelStatus "
+    "tier { node { level name pointsToLevelUp } } } } }"
+)
+TENGAH_PAIRED_FCUS_QUERY = (
+    "query($utilityAccountNumber: String!) { "
+    "getPairedFCUs(utilityAccountNumber: $utilityAccountNumber)"
+    "{ displayName thingName } }"
 )
 
 
@@ -199,6 +220,69 @@ class GreenGoal:
 
 
 @dataclass(frozen=True)
+class GreenUpInfo:
+    points: float
+    tier_name: str | None
+    tier_level: float | None
+    points_to_level_up: float | None
+
+
+@dataclass(frozen=True)
+class EvWalletInfo:
+    points: float
+    dollar_balance: float | None
+    current_tier_id: float | None
+
+
+@dataclass(frozen=True)
+class EvSessionInfo:
+    status: str | None
+    kwh: float | None
+    total_cost: str | None
+    start: str | None
+    order_id: str | None
+
+
+@dataclass(frozen=True)
+class EvChargeInfo:
+    kwh: float | None
+    amount: float | None
+    created_at: str | None
+    status: str | None
+    address: str | None
+
+
+@dataclass(frozen=True)
+class EvUnpaidInfo:
+    count: int
+    amount: float | None
+
+
+@dataclass(frozen=True)
+class FcuInfo:
+    thing_name: str
+    display_name: str | None
+    is_on: bool | None
+    is_online: bool | None
+    room_temperature: float | None
+    setpoint: float | None
+    mode: str | None
+
+
+@dataclass(frozen=True)
+class BillDeliveryInfo:
+    soft_copy: bool | None
+    hard_copy: bool | None
+
+
+@dataclass(frozen=True)
+class TariffInfo:
+    kwh_price: float | None
+    monthly_price: float | None
+    consumption: str | None
+
+
+@dataclass(frozen=True)
 class UsageReadings:
     premise: PremiseInfo
     electricity: UtilitySeries | None
@@ -213,6 +297,15 @@ class UsageReadings:
     amount_due: PayableInfo | None = None
     meter_registers: tuple[MeterRegister, ...] = ()
     green_goals: tuple[GreenGoal, ...] = ()
+    greenup: GreenUpInfo | None = None
+    ev_wallet: EvWalletInfo | None = None
+    ev_session: EvSessionInfo | None = None
+    ev_last_charge: EvChargeInfo | None = None
+    ev_unpaid: EvUnpaidInfo | None = None
+    unread_notifications: int | None = None
+    bill_delivery: BillDeliveryInfo | None = None
+    fcu: FcuInfo | None = None
+    tariff: TariffInfo | None = None
 
     @property
     def premise_id(self) -> str:
@@ -263,6 +356,15 @@ def _decode_json(body: bytes) -> object:
     if not body:
         return {}
     return json.loads(body.decode("utf-8"))
+
+
+def _optional_json(response: HttpResponse) -> object | None:
+    if response.status >= 400:
+        return None
+    try:
+        return _decode_json(response.body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
 
 
 def _require_mapping(value: object, label: str) -> dict[str, object]:
@@ -578,6 +680,218 @@ def _parse_green_goals(body: object, premise_id: str) -> tuple[GreenGoal, ...]:
     return tuple(goals)
 
 
+def _graphql_data(body: object) -> dict[str, object] | None:
+    if not isinstance(body, dict):
+        return None
+    data = body.get("data")
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
+def _parse_greenup(body: object) -> GreenUpInfo | None:
+    data = _graphql_data(body)
+    if data is None:
+        return None
+    account = data.get("account")
+    if not isinstance(account, dict):
+        return None
+    node = account.get("node")
+    if not isinstance(node, dict):
+        return None
+    points = _optional_float(node.get("totalPoints"))
+    if points is None:
+        return None
+    tier = node.get("tier")
+    tier_node = tier.get("node") if isinstance(tier, dict) else None
+    tier_map = tier_node if isinstance(tier_node, dict) else {}
+    return GreenUpInfo(
+        points=points,
+        tier_name=_optional_str(tier_map.get("name")),
+        tier_level=_optional_float(tier_map.get("level")),
+        points_to_level_up=_optional_float(tier_map.get("pointsToLevelUp")),
+    )
+
+
+def _parse_ev_wallet(body: object) -> EvWalletInfo | None:
+    if not isinstance(body, dict):
+        return None
+    points = _optional_float(body.get("points_balance"))
+    dollars = _optional_float(body.get("dollar_balance"))
+    if points is None and dollars is None:
+        return None
+    if (points or 0) == 0 and (dollars or 0) == 0:
+        return None
+    return EvWalletInfo(
+        points=points or 0.0,
+        dollar_balance=dollars,
+        current_tier_id=_optional_float(body.get("current_tier_id")),
+    )
+
+
+def _session_map(body: object) -> dict[str, object] | None:
+    if not isinstance(body, dict):
+        return None
+    data = body.get("data")
+    if isinstance(data, dict):
+        return data
+    if body.get("status") or body.get("kwh") or body.get("order_id"):
+        return body
+    return None
+
+
+def _parse_ev_session(body: object) -> EvSessionInfo | None:
+    data = _session_map(body)
+    if data is None:
+        return None
+    status = _optional_str(data.get("status"))
+    kwh = _optional_float(data.get("kwh"))
+    order_id = _optional_str(data.get("order_id"))
+    if status is None and kwh is None and order_id is None:
+        return None
+    return EvSessionInfo(
+        status=status,
+        kwh=kwh,
+        total_cost=_optional_str(data.get("total_cost")),
+        start=_optional_str(data.get("start_datetime")),
+        order_id=order_id,
+    )
+
+
+def _parse_ev_last_charge(body: object) -> EvChargeInfo | None:
+    if not isinstance(body, dict):
+        return None
+    rows = body.get("data")
+    if not isinstance(rows, list) or not rows:
+        return None
+    first = rows[0]
+    if not isinstance(first, dict):
+        return None
+    kwh = _optional_float(first.get("total_consumption")) or _optional_float(
+        first.get("connector_kwh")
+    )
+    amount = _optional_float(first.get("transaction_amount"))
+    if kwh is None and amount is None:
+        return None
+    return EvChargeInfo(
+        kwh=kwh,
+        amount=amount,
+        created_at=_optional_str(first.get("created_at")),
+        status=_optional_str(first.get("transaction_status")),
+        address=_optional_str(first.get("address")),
+    )
+
+
+def _parse_ev_unpaid(body: object) -> EvUnpaidInfo | None:
+    if not isinstance(body, dict):
+        return None
+    data = body.get("data")
+    payload = data if isinstance(data, dict) else body
+    rows = payload.get("orders") if isinstance(payload, dict) else None
+    if not isinstance(rows, list) or not rows:
+        return None
+    total = 0.0
+    found = False
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        amount = _optional_float(row.get("amount"))
+        if amount is not None:
+            total += amount
+            found = True
+    return EvUnpaidInfo(count=len(rows), amount=total if found else None)
+
+
+def _parse_unread(body: object) -> int | None:
+    if not isinstance(body, dict):
+        return None
+    value = body.get("total_unread_notifications")
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_bill_delivery(
+    body: object, account_number: str | None
+) -> BillDeliveryInfo | None:
+    if not isinstance(body, dict):
+        return None
+    rows = body.get("preferences")
+    if not isinstance(rows, list) or not rows:
+        return None
+    wanted = _account_digits(account_number)
+    chosen: dict[str, object] | None = None
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if chosen is None:
+            chosen = row
+        if wanted and _account_digits(_optional_str(row.get("accountNo"))) == wanted:
+            chosen = row
+            break
+    if chosen is None:
+        return None
+    return BillDeliveryInfo(
+        soft_copy=_optional_bool(chosen.get("isSoftCopy")),
+        hard_copy=_optional_bool(chosen.get("isHardCopy")),
+    )
+
+
+def _parse_paired_fcus(body: object) -> list[tuple[str, str | None]]:
+    data = _graphql_data(body)
+    if data is None:
+        return []
+    rows = data.get("getPairedFCUs")
+    if not isinstance(rows, list):
+        return []
+    out: list[tuple[str, str | None]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        thing = _optional_str(row.get("thingName"))
+        if not thing:
+            continue
+        out.append((thing, _optional_str(row.get("displayName"))))
+    return out
+
+
+def _parse_fcu_status(
+    body: object, thing_name: str, display_name: str | None
+) -> FcuInfo | None:
+    if not isinstance(body, dict):
+        return None
+    if body.get("fcu_not_paired") is True:
+        return None
+    return FcuInfo(
+        thing_name=thing_name,
+        display_name=display_name or _optional_str(body.get("display_name")),
+        is_on=_optional_bool(body.get("is_on")),
+        is_online=_optional_bool(body.get("is_online")),
+        room_temperature=_optional_float(body.get("room_temperature")),
+        setpoint=_optional_float(body.get("temperature")),
+        mode=_optional_str(body.get("operation_mode")),
+    )
+
+
+def _parse_tariff(body: object) -> TariffInfo | None:
+    if not isinstance(body, dict):
+        return None
+    kwh = _optional_float(body.get("sp_kwh_price"))
+    monthly = _optional_float(body.get("sp_monthly_price"))
+    if kwh is None and monthly is None:
+        return None
+    return TariffInfo(
+        kwh_price=kwh,
+        monthly_price=monthly,
+        consumption=_optional_str(body.get("consumption")),
+    )
+
+
 def _parse_last_bill(body: object) -> BillInfo | None:
     if not isinstance(body, dict):
         return None
@@ -776,7 +1090,7 @@ class SpGroupClient:
         )
 
     def _jarvis_post(
-        self, session: Session, path: str, payload: dict[str, str]
+        self, session: Session, path: str, payload: Mapping[str, object]
     ) -> HttpResponse:
         headers = dict(self._auth_headers(session))
         headers["Content-Type"] = CONTENT_TYPE_JSON
@@ -786,6 +1100,16 @@ class SpGroupClient:
             headers,
             json.dumps(payload).encode("utf-8"),
         )
+
+    def _optional_get(self, session: Session, path: str) -> object | None:
+        response = self._jarvis_get(session, path)
+        return _optional_json(response)
+
+    def _optional_post(
+        self, session: Session, path: str, payload: Mapping[str, object]
+    ) -> object | None:
+        response = self._jarvis_post(session, path, payload)
+        return _optional_json(response)
 
     def _fetch_usage_with(self, session: Session) -> UsageReadings:
         me_response = self._jarvis_get(session, JARVIS_ME_PATH)
@@ -807,6 +1131,7 @@ class SpGroupClient:
         last_bill = self._fetch_last_bill(session, info.account_number)
         amount_due = self._fetch_amount_due(session, info)
         green_goals = self._fetch_green_goals(session, info.id)
+        extras = self._fetch_optional(session, info)
         return UsageReadings(
             premise=info,
             electricity=electricity,
@@ -821,6 +1146,15 @@ class SpGroupClient:
             amount_due=amount_due,
             meter_registers=meter_registers,
             green_goals=green_goals,
+            greenup=extras[0],
+            ev_wallet=extras[1],
+            ev_session=extras[2],
+            ev_last_charge=extras[3],
+            ev_unpaid=extras[4],
+            unread_notifications=extras[5],
+            bill_delivery=extras[6],
+            fcu=extras[7],
+            tariff=extras[8],
         )
 
     def _fetch_meter_reading(
@@ -838,14 +1172,104 @@ class SpGroupClient:
     def _fetch_green_goals(
         self, session: Session, premise_id: str
     ) -> tuple[GreenGoal, ...]:
-        response = self._jarvis_get(session, JARVIS_GREEN_GOALS_PATH)
-        if response.status >= 400:
-            return ()
-        try:
-            body = _decode_json(response.body)
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        body = self._optional_get(session, JARVIS_GREEN_GOALS_PATH)
+        if body is None:
             return ()
         return _parse_green_goals(body, premise_id)
+
+    def _fetch_optional(
+        self, session: Session, premise: PremiseInfo
+    ) -> tuple[
+        GreenUpInfo | None,
+        EvWalletInfo | None,
+        EvSessionInfo | None,
+        EvChargeInfo | None,
+        EvUnpaidInfo | None,
+        int | None,
+        BillDeliveryInfo | None,
+        FcuInfo | None,
+        TariffInfo | None,
+    ]:
+        greenup = _parse_greenup(
+            self._optional_post(
+                session, GREENUP_GRAPHQL_PATH, {"query": GREENUP_ACCOUNT_QUERY}
+            )
+        )
+        ev_wallet = _parse_ev_wallet(self._optional_get(session, TYCHE_WALLET_PATH))
+        ev_session = _parse_ev_session(
+            self._optional_get(session, EVA_LATEST_SESSION_PATH)
+        )
+        history_qs = urlencode({"offSet": "0", "pageSize": "5"})
+        history_path = f"{EVA_CHARGE_HISTORY_PATH}?{history_qs}"
+        history_body = self._optional_get(session, history_path)
+        ev_last_charge = _parse_ev_last_charge(history_body)
+        ev_unpaid = _parse_ev_unpaid(self._optional_get(session, EVA_UNPAID_PATH))
+        unread_path = (
+            f"{NOTIFICATIONS_PATH}?"
+            + urlencode(
+                {
+                    "limit": "1",
+                    "include_totals_unread_notifications": "true",
+                    "include_notifications": "false",
+                }
+            )
+        )
+        unread = _parse_unread(self._optional_get(session, unread_path))
+        bill_delivery = _parse_bill_delivery(
+            self._optional_get(session, BILL_PREFERENCES_PATH),
+            premise.account_number,
+        )
+        fcu = self._fetch_fcu(session, premise.account_number)
+        tariff = self._fetch_tariff(session)
+        return (
+            greenup,
+            ev_wallet,
+            ev_session,
+            ev_last_charge,
+            ev_unpaid,
+            unread,
+            bill_delivery,
+            fcu,
+            tariff,
+        )
+
+    def _fetch_fcu(
+        self, session: Session, account_number: str | None
+    ) -> FcuInfo | None:
+        if not account_number:
+            return None
+        body = self._optional_post(
+            session,
+            FROSTY_GRAPHQL_PATH,
+            {
+                "query": TENGAH_PAIRED_FCUS_QUERY,
+                "variables": {"utilityAccountNumber": account_number},
+            },
+        )
+        paired = _parse_paired_fcus(body)
+        if not paired:
+            return None
+        thing, display = paired[0]
+        query = urlencode(
+            {"thingName": thing, "utility_acc_id": account_number}
+        )
+        status = self._optional_get(session, f"{FROSTY_FCU_STATUS_PATH}?{query}")
+        return _parse_fcu_status(status, thing, display)
+
+    def _fetch_tariff(self, session: Session) -> TariffInfo | None:
+        response = self._transport.request(
+            "GET",
+            f"{PUBLIC_HOST}{PRICEPLAN_PATH}?{urlencode({'consumption': '350'})}",
+            {
+                "User-Agent": USER_AGENT,
+                "Accept": "application/json",
+            },
+            None,
+        )
+        body = _optional_json(response)
+        if body is None:
+            return None
+        return _parse_tariff(body)
 
     def _fetch_ppms(
         self, session: Session, premise: PremiseInfo
