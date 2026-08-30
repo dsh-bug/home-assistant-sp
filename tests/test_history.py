@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from custom_components.sp_group.client import SG_TZ, PeriodReading, SpGroupClient
+from custom_components.sp_group.client import SG_TZ, PeriodReading
 from custom_components.sp_group.history import (
     cumulative_points,
     fold_half_hours,
@@ -17,13 +17,13 @@ from custom_components.sp_group.history import (
 )
 from custom_components.sp_group.mapper import electricity_graph_periods
 
-from .conftest import FixtureTransport, billed_totals_from_charts_payload, load_fixture
+from .conftest import billed_totals_from_charts_payload, fixture_client, load_fixture
 
 
 def test_cumulative_points_sum_fixture_currents() -> None:
     charts = json.loads(load_fixture("jarvis_charts.json"))
     expected_kwh, expected_m3 = billed_totals_from_charts_payload(charts)
-    client = SpGroupClient("user@example.com", "secret", transport=FixtureTransport())
+    client = fixture_client()
     usage = client.fetch_usage()
     elec = cumulative_points(usage.electricity_periods)
     water = cumulative_points(usage.water_periods)
@@ -61,7 +61,7 @@ def test_trim_unreported_drops_trailing_zeros() -> None:
 
 
 def test_monthly_bill_points_one_per_month() -> None:
-    client = SpGroupClient("user@example.com", "secret", transport=FixtureTransport())
+    client = fixture_client()
     usage = client.fetch_usage()
     points = monthly_bill_points(usage.bills)
     assert len(points) == 2
@@ -100,7 +100,7 @@ def test_merge_prefers_hourly_on_same_day() -> None:
 
 
 def test_electricity_graph_uses_ami_not_billed() -> None:
-    client = SpGroupClient("user@example.com", "secret", transport=FixtureTransport())
+    client = fixture_client()
     usage = client.fetch_usage()
     graph = electricity_graph_periods(usage)
     assert sum(item.amount for item in graph) == pytest.approx(24.0)

@@ -69,9 +69,8 @@ class LaunchFixtureTransport:
 
 
 def main() -> None:
-    client = SpGroupClient(
-        "user@example.com", "secret", transport=LaunchFixtureTransport()
-    )
+    client = SpGroupClient(transport=LaunchFixtureTransport())
+    client.login("user@example.com", "secret")
     usage = client.fetch_usage()
     print(f"electricity_kwh={usage.electricity_kwh}")
     print(f"water_m3={usage.water_m3}")

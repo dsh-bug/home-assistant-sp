@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 
 from custom_components.sp_group.client import (
-    SpGroupClient,
     _eva_sgd,
     _parse_bill_delivery,
     _parse_ev_last_charge,
@@ -28,7 +27,7 @@ from custom_components.sp_group.const import (
 )
 from custom_components.sp_group.mapper import sensors_from_usage
 
-from .conftest import FixtureTransport
+from .conftest import FixtureTransport, fixture_client
 
 
 def test_greenup_and_unread_appear_when_payloads_exist() -> None:
@@ -89,9 +88,7 @@ def test_greenup_and_unread_appear_when_payloads_exist() -> None:
                 )
             return super().request(method, url, headers, body, timeout=timeout)
 
-    usage = SpGroupClient(
-        "user@example.com", "secret", transport=ExtraTransport()
-    ).fetch_usage()
+    usage = fixture_client(ExtraTransport()).fetch_usage()
     assert usage.greenup is not None
     assert usage.greenup.points == 12
     assert usage.unread_notifications == 3
@@ -153,9 +150,7 @@ def test_eva_scope_not_found_skips_remaining_eva() -> None:
                 raise AssertionError(f"eva call after deny: {parsed.path}")
             return super().request(method, url, headers, body, timeout=timeout)
 
-    usage = SpGroupClient(
-        "user@example.com", "secret", transport=DeniedEva()
-    ).fetch_usage()
+    usage = fixture_client(DeniedEva()).fetch_usage()
     assert usage.ev_session is None
     assert usage.ev_last_charge is None
     assert usage.ev_unpaid is None
@@ -163,7 +158,7 @@ def test_eva_scope_not_found_skips_remaining_eva() -> None:
 
 def test_optional_calls_use_short_timeout() -> None:
     transport = FixtureTransport()
-    SpGroupClient("user@example.com", "secret", transport=transport).fetch_usage()
+    fixture_client(transport).fetch_usage()
     eva = [
         req
         for req in transport.requests
@@ -222,9 +217,7 @@ def test_paired_fcus_each_get_a_sensor() -> None:
                 )
             return super().request(method, url, headers, body, timeout=timeout)
 
-    usage = SpGroupClient(
-        "user@example.com", "secret", transport=TwoFcu()
-    ).fetch_usage()
+    usage = fixture_client(TwoFcu()).fetch_usage()
     assert len(usage.fcus) == 2
     by_key = {spec.key: spec for spec in sensors_from_usage(usage)}
     living = by_key["fcu_tengah_living"]
@@ -237,12 +230,12 @@ def test_paired_fcus_each_get_a_sensor() -> None:
 
 def test_tariff_consumption_from_last_billed_kwh() -> None:
     transport = FixtureTransport()
-    SpGroupClient("user@example.com", "secret", transport=transport).fetch_usage()
+    fixture_client(transport).fetch_usage()
     urls = [req.url for req in transport.requests if "priceplan" in req.url]
     assert urls
     assert "consumption=142" in urls[0]
     gas = FixtureTransport(charts_fixture="jarvis_charts_gas.json")
-    SpGroupClient("user@example.com", "secret", transport=gas).fetch_usage()
+    fixture_client(gas).fetch_usage()
     gas_urls = [req.url for req in gas.requests if "priceplan" in req.url]
     assert f"consumption={TARIFF_DEFAULT_CONSUMPTION_KWH}" in gas_urls[0]
     assert _tariff_consumption(None) == str(TARIFF_DEFAULT_CONSUMPTION_KWH)
