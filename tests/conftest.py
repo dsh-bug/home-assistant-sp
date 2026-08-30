@@ -8,7 +8,10 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from custom_components.sp_group.client import HttpResponse
+from custom_components.sp_group.client import SpGroupClient
 from custom_components.sp_group.const import (
+    AUTH0_GRANT_TYPE,
+    AUTH0_MFA_OTP_GRANT,
     B2C_HOST,
     IDENTITY_HOST,
     JARVIS_AMI_PATH,
@@ -29,6 +32,12 @@ def load_fixture(name: str) -> bytes:
     return (FIXTURES / name).read_bytes()
 
 
+def fixture_client(transport: FixtureTransport | None = None) -> SpGroupClient:
+    client = SpGroupClient(transport=transport or FixtureTransport())
+    client.login("user@example.com", "secret")
+    return client
+
+
 @dataclass
 class RecordedRequest:
     method: str
@@ -43,6 +52,8 @@ class FixtureTransport:
     """Serves recorded Auth0/Jarvis JSON. Does not implement client logic."""
 
     fail_login: bool = False
+    require_mfa: bool = False
+    mfa_success: bool = False
     charts_fixture: str = "jarvis_charts.json"
     me_fixture: str = "jarvis_me.json"
     smrd_fixture: str | None = "jarvis_smrd.json"
@@ -70,6 +81,21 @@ class FixtureTransport:
         origin = f"{parsed.scheme}://{parsed.netloc}"
         path = parsed.path
         if method == "POST" and origin == IDENTITY_HOST and path == OAUTH_TOKEN_PATH:
+            import json
+
+            request_body = json.loads(body.decode("utf-8")) if body else {}
+            if self.require_mfa and request_body.get("grant_type") == AUTH0_GRANT_TYPE:
+                return HttpResponse(
+                    status=403,
+                    headers={"Content-Type": "application/json"},
+                    body=load_fixture("oauth_token_mfa_required.json"),
+                )
+            if self.mfa_success and request_body.get("grant_type") == AUTH0_MFA_OTP_GRANT:
+                return HttpResponse(
+                    status=200,
+                    headers={"Content-Type": "application/json"},
+                    body=load_fixture("oauth_token_mfa_success.json"),
+                )
             if self.fail_login:
                 return HttpResponse(
                     status=403,

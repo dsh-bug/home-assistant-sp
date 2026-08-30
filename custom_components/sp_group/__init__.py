@@ -22,7 +22,6 @@ __all__ = ["DOMAIN", "PLATFORMS"]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
     from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 
     from .client import AuthError, Session, SpGroupClient, UsageError
@@ -41,8 +40,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             scope=None,
         )
     client = SpGroupClient(
-        username=entry.data[CONF_USERNAME],
-        password=entry.data[CONF_PASSWORD],
         session=session,
     )
     coordinator = SpGroupCoordinator(hass, client, entry)

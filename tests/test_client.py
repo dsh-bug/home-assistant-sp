@@ -12,6 +12,7 @@ from custom_components.sp_group.const import (
     AUTH0_AUDIENCE,
     AUTH0_CLIENT_ID,
     AUTH0_GRANT_TYPE,
+    AUTH0_MFA_OTP_GRANT,
     AUTH0_REALM,
     AUTH0_REFRESH_GRANT,
     AUTH0_SCOPE,
@@ -29,14 +30,19 @@ from custom_components.sp_group.const import (
     USER_AGENT,
 )
 
-from .conftest import FixtureTransport, billed_totals_from_charts_payload, load_fixture
+from .conftest import (
+    FixtureTransport,
+    billed_totals_from_charts_payload,
+    fixture_client,
+    load_fixture,
+)
 
 
 def test_login_returns_access_token_from_fixture() -> None:
     token_payload = json.loads(load_fixture("oauth_token_success.json"))
     transport = FixtureTransport()
-    client = SpGroupClient("user@example.com", "secret", transport=transport)
-    session = client.login()
+    client = SpGroupClient(transport=transport)
+    session = client.login("user@example.com", "secret")
     assert session.access_token == token_payload["access_token"]
     assert session.id_token == token_payload["id_token"]
     assert session.refresh_token == token_payload["refresh_token"]
@@ -44,8 +50,8 @@ def test_login_returns_access_token_from_fixture() -> None:
 
 def test_login_sends_auth0_password_realm_body() -> None:
     transport = FixtureTransport()
-    client = SpGroupClient("user@example.com", "secret", transport=transport)
-    client.login()
+    client = SpGroupClient(transport=transport)
+    client.login("user@example.com", "secret")
     recorded = transport.requests[0]
     assert recorded.method == "POST"
     assert recorded.url == f"{IDENTITY_HOST}{OAUTH_TOKEN_PATH}"
@@ -70,6 +76,31 @@ def test_login_scope_includes_me_rbac() -> None:
     assert "me:uportal" in AUTH0_SCOPE
 
 
+def test_mfa_challenge_exposes_token_and_submit_sends_otp() -> None:
+    transport = FixtureTransport(require_mfa=True, mfa_success=True)
+    client = SpGroupClient(transport=transport)
+
+    with pytest.raises(AuthError) as raised:
+        client.login("user@example.com", "secret")
+
+    assert raised.value.error == "mfa_required"
+    assert raised.value.mfa_token == "mfa-token"
+
+    session = client.submit_mfa(raised.value.mfa_token, "123456")
+    assert session.access_token == "mfa-access-token"
+    assert session.id_token == "mfa-id-token"
+    assert session.refresh_token == "mfa-refresh-token"
+    recorded = transport.requests[1]
+    assert recorded.body is not None
+    body = json.loads(recorded.body.decode("utf-8"))
+    assert body == {
+        "grant_type": AUTH0_MFA_OTP_GRANT,
+        "client_id": AUTH0_CLIENT_ID,
+        "mfa_token": "mfa-token",
+        "otp": "123456",
+    }
+
+
 def test_stored_session_skips_password_login() -> None:
     token_payload = json.loads(load_fixture("oauth_token_success.json"))
     session = Session(
@@ -80,9 +111,7 @@ def test_stored_session_skips_password_login() -> None:
         expires_at=int(time.time()) + 3600,
     )
     transport = FixtureTransport()
-    client = SpGroupClient(
-        "user@example.com", "secret", transport=transport, session=session
-    )
+    client = SpGroupClient(transport=transport, session=session)
     client.fetch_usage()
     assert all(not req.url.endswith(OAUTH_TOKEN_PATH) for req in transport.requests)
 
@@ -91,8 +120,6 @@ def test_refresh_sends_refresh_token_grant() -> None:
     token_payload = json.loads(load_fixture("oauth_token_success.json"))
     transport = FixtureTransport()
     client = SpGroupClient(
-        "user@example.com",
-        "secret",
         transport=transport,
         session=Session(
             access_token=token_payload["access_token"],
@@ -118,7 +145,7 @@ def test_fetch_usage_returns_kwh_and_water_from_charts_fixture() -> None:
     premise_id = me_payload["premises"][0]["id"]
 
     transport = FixtureTransport()
-    client = SpGroupClient("user@example.com", "secret", transport=transport)
+    client = fixture_client(transport)
     usage = client.fetch_usage()
 
     assert usage.electricity_kwh == expected_kwh
@@ -235,9 +262,7 @@ def test_me_forbidden_uses_server_error_description() -> None:
                 )
             return super().request(method, url, headers, body, timeout=timeout)
 
-    client = SpGroupClient(
-        "user@example.com", "secret", transport=ForbiddenMeTransport()
-    )
+    client = fixture_client(ForbiddenMeTransport())
     with pytest.raises(AuthError) as exc_info:
         client.fetch_usage()
     assert exc_info.value.error == "invalid_claim"
@@ -247,9 +272,9 @@ def test_me_forbidden_uses_server_error_description() -> None:
 def test_invalid_credentials_raise_auth_error() -> None:
     fail_payload = json.loads(load_fixture("oauth_token_invalid_grant.json"))
     transport = FixtureTransport(fail_login=True)
-    client = SpGroupClient("user@example.com", "wrong", transport=transport)
+    client = SpGroupClient(transport=transport)
     with pytest.raises(AuthError) as exc_info:
-        client.login()
+        client.login("user@example.com", "wrong")
     assert exc_info.value.error == fail_payload["error"]
     assert exc_info.value.error_description == fail_payload["error_description"]
     with pytest.raises(AuthError):
@@ -262,7 +287,7 @@ def test_invalid_credentials_raise_auth_error() -> None:
 
 
 def test_empty_gas_does_not_fail_fetch() -> None:
-    client = SpGroupClient("user@example.com", "secret", transport=FixtureTransport())
+    client = fixture_client()
     usage = client.fetch_usage()
     assert usage.gas is None
     assert usage.electricity is not None
@@ -270,10 +295,8 @@ def test_empty_gas_does_not_fail_fetch() -> None:
 
 
 def test_gas_only_charts_return_gas_series() -> None:
-    client = SpGroupClient(
-        "user@example.com",
-        "secret",
-        transport=FixtureTransport(charts_fixture="jarvis_charts_gas.json"),
+    client = fixture_client(
+        FixtureTransport(charts_fixture="jarvis_charts_gas.json")
     )
     usage = client.fetch_usage()
     assert usage.electricity is None
@@ -302,9 +325,7 @@ def test_amount_due_credit_is_negative_sgd() -> None:
                 )
             return super().request(method, url, headers, body, timeout=timeout)
 
-    usage = SpGroupClient(
-        "user@example.com", "secret", transport=CreditTransport()
-    ).fetch_usage()
+    usage = fixture_client(CreditTransport()).fetch_usage()
     assert usage.amount_due is not None
     assert usage.amount_due.amount_sgd == pytest.approx(-296.31)
 

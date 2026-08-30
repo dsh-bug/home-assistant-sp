@@ -33,13 +33,13 @@ from custom_components.sp_group.const import (
 )
 from custom_components.sp_group.mapper import extra_attributes, sensors_from_usage
 
-from .conftest import FixtureTransport, billed_totals_from_charts_payload, load_fixture
+from .conftest import FixtureTransport, billed_totals_from_charts_payload, fixture_client, load_fixture
 
 
 def test_sensors_match_energy_dashboard_contract() -> None:
     charts = json.loads(load_fixture("jarvis_charts.json"))
     expected_kwh, expected_m3 = billed_totals_from_charts_payload(charts)
-    client = SpGroupClient("user@example.com", "secret", transport=FixtureTransport())
+    client = fixture_client()
     usage = client.fetch_usage()
     specs = sensors_from_usage(usage)
     by_key = {spec.key: spec for spec in specs}
@@ -108,10 +108,8 @@ def test_sensors_match_energy_dashboard_contract() -> None:
 
 
 def test_gas_only_charts_yield_gas_sensors() -> None:
-    client = SpGroupClient(
-        "user@example.com",
-        "secret",
-        transport=FixtureTransport(charts_fixture="jarvis_charts_gas.json"),
+    client = fixture_client(
+        FixtureTransport(charts_fixture="jarvis_charts_gas.json")
     )
     usage = client.fetch_usage()
     by_key = {spec.key: spec for spec in sensors_from_usage(usage)}
@@ -124,9 +122,7 @@ def test_gas_only_charts_yield_gas_sensors() -> None:
 
 
 def test_failed_auth_does_not_yield_sensor_values() -> None:
-    client = SpGroupClient(
-        "user@example.com", "wrong", transport=FixtureTransport(fail_login=True)
-    )
+    client = SpGroupClient(transport=FixtureTransport(fail_login=True))
     with pytest.raises(AuthError):
-        client.fetch_usage()
+        client.login("user@example.com", "wrong")
     assert sensors_from_usage(None) == []

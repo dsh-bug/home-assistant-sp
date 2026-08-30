@@ -35,6 +35,7 @@ from .const import (
     AUTH0_AUDIENCE,
     AUTH0_CLIENT_ID,
     AUTH0_GRANT_TYPE,
+    AUTH0_MFA_OTP_GRANT,
     AUTH0_REALM,
     AUTH0_REFRESH_GRANT,
     AUTH0_SCOPE,
@@ -84,9 +85,12 @@ TENGAH_PAIRED_FCUS_QUERY = (
 class AuthError(Exception):
     """Login rejected by identity.spdigital.sg (invalid credentials or Auth0 error)."""
 
-    def __init__(self, error: str, error_description: str = "") -> None:
+    def __init__(
+        self, error: str, error_description: str = "", mfa_token: str | None = None
+    ) -> None:
         self.error = error
         self.error_description = error_description
+        self.mfa_token = mfa_token
         super().__init__(error_description or error)
 
 
@@ -1081,13 +1085,9 @@ def _parse_ami_rows(body: object) -> tuple[PeriodReading, ...]:
 class SpGroupClient:
     def __init__(
         self,
-        username: str,
-        password: str,
         transport: Transport | None = None,
         session: Session | None = None,
     ) -> None:
-        self._username = username
-        self._password = password
         self._transport = transport or UrllibTransport()
         self._session = session
 
@@ -1095,15 +1095,28 @@ class SpGroupClient:
     def session(self) -> Session | None:
         return self._session
 
-    def login(self) -> Session:
+    def login(self, username: str, password: str) -> Session:
         payload = {
             "client_id": AUTH0_CLIENT_ID,
             "audience": AUTH0_AUDIENCE,
-            "username": self._username,
-            "password": self._password,
+            "username": username,
+            "password": password,
             "scope": AUTH0_SCOPE,
             "grant_type": AUTH0_GRANT_TYPE,
             "realm": AUTH0_REALM,
+        }
+        mapping = self._oauth_post(payload)
+        session = _session_from_oauth(mapping, None)
+        self._session = session
+        return session
+
+    def submit_mfa(self, mfa_token: str, otp: str) -> Session:
+        """Exchange an Auth0 MFA token and one-time password for a session."""
+        payload = {
+            "grant_type": AUTH0_MFA_OTP_GRANT,
+            "client_id": AUTH0_CLIENT_ID,
+            "mfa_token": mfa_token,
+            "otp": otp,
         }
         mapping = self._oauth_post(payload)
         session = _session_from_oauth(mapping, None)
@@ -1134,7 +1147,7 @@ class SpGroupClient:
                 return self.refresh()
             except AuthError:
                 pass
-        return self.login()
+        raise AuthError("invalid_grant", "login credentials required")
 
     def _oauth_post(self, payload: dict[str, str]) -> dict[str, object]:
         response = self._transport.request(
@@ -1153,7 +1166,12 @@ class SpGroupClient:
                 or mapping.get("description")
                 or "authentication failed"
             )
-            raise AuthError(error, description)
+            mfa_token = mapping.get("mfa_token")
+            raise AuthError(
+                error,
+                description,
+                mfa_token=mfa_token if isinstance(mfa_token, str) else None,
+            )
         return mapping
 
     def fetch_usage(self) -> UsageReadings:

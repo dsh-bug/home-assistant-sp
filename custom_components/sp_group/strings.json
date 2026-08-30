@@ -9,6 +9,13 @@
           "password": "Password"
         }
       },
+      "mfa": {
+        "title": "SP Group verification",
+        "description": "Enter the one-time code from your authenticator app.",
+        "data": {
+          "mfa_code": "Verification code"
+        }
+      },
       "reauth_confirm": {
         "title": "Reauthenticate SP Group",
         "description": "The stored session expired. Sign in again with your SP e-account.",

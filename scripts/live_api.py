@@ -29,9 +29,9 @@ def main() -> int:
     if not username or not password:
         print("SP_USERNAME/SP_PASSWORD not set; skipping live call")
         return 0
-    client = SpGroupClient(username, password)
+    client = SpGroupClient()
     try:
-        session = client.login()
+        session = client.login(username, password)
         print(f"login=ok access_token_len={len(session.access_token)}")
         usage = client.fetch_usage()
         print(f"premise_id={usage.premise_id}")
