@@ -15,8 +15,8 @@ from .client import AuthError, SpGroupClient, UsageError
 from .const import (
     CONF_ACCESS_TOKEN,
     CONF_ID_TOKEN,
-    CONF_REFRESH_TOKEN,
     CONF_MFA_CODE,
+    CONF_REFRESH_TOKEN,
     DOMAIN,
 )
 

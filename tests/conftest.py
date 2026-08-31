@@ -7,8 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
 
-from custom_components.sp_group.client import HttpResponse
-from custom_components.sp_group.client import SpGroupClient
+from custom_components.sp_group.client import HttpResponse, SpGroupClient
 from custom_components.sp_group.const import (
     AUTH0_GRANT_TYPE,
     AUTH0_MFA_OTP_GRANT,
@@ -90,7 +89,10 @@ class FixtureTransport:
                     headers={"Content-Type": "application/json"},
                     body=load_fixture("oauth_token_mfa_required.json"),
                 )
-            if self.mfa_success and request_body.get("grant_type") == AUTH0_MFA_OTP_GRANT:
+            if (
+                self.mfa_success
+                and request_body.get("grant_type") == AUTH0_MFA_OTP_GRANT
+            ):
                 return HttpResponse(
                     status=200,
                     headers={"Content-Type": "application/json"},

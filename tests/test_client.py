@@ -295,9 +295,7 @@ def test_empty_gas_does_not_fail_fetch() -> None:
 
 
 def test_gas_only_charts_return_gas_series() -> None:
-    client = fixture_client(
-        FixtureTransport(charts_fixture="jarvis_charts_gas.json")
-    )
+    client = fixture_client(FixtureTransport(charts_fixture="jarvis_charts_gas.json"))
     usage = client.fetch_usage()
     assert usage.electricity is None
     assert usage.water is None
