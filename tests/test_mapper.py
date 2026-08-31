@@ -33,7 +33,12 @@ from custom_components.sp_group.const import (
 )
 from custom_components.sp_group.mapper import extra_attributes, sensors_from_usage
 
-from .conftest import FixtureTransport, billed_totals_from_charts_payload, fixture_client, load_fixture
+from .conftest import (
+    FixtureTransport,
+    billed_totals_from_charts_payload,
+    fixture_client,
+    load_fixture,
+)
 
 
 def test_sensors_match_energy_dashboard_contract() -> None:
@@ -108,9 +113,7 @@ def test_sensors_match_energy_dashboard_contract() -> None:
 
 
 def test_gas_only_charts_yield_gas_sensors() -> None:
-    client = fixture_client(
-        FixtureTransport(charts_fixture="jarvis_charts_gas.json")
-    )
+    client = fixture_client(FixtureTransport(charts_fixture="jarvis_charts_gas.json"))
     usage = client.fetch_usage()
     by_key = {spec.key: spec for spec in sensors_from_usage(usage)}
     assert SENSOR_KEY_ELECTRICITY not in by_key
