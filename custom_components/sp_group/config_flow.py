@@ -28,16 +28,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 )
 
 
-async def _validate(
-    hass: HomeAssistant, username: str, password: str
-) -> dict[str, str]:
-    client = SpGroupClient()
-
-    def _login_and_fetch() -> None:
-        client.login(username, password)
-        client.fetch_usage()
-
-    await hass.async_add_executor_job(_login_and_fetch)
+def _entry_data(client: SpGroupClient, username: str, password: str) -> dict[str, str]:
     session = client.session
     if session is None:
         raise UsageError("session missing after login")
@@ -50,6 +41,19 @@ async def _validate(
     if session.refresh_token:
         data[CONF_REFRESH_TOKEN] = session.refresh_token
     return data
+
+
+async def _validate(
+    hass: HomeAssistant, username: str, password: str
+) -> dict[str, str]:
+    client = SpGroupClient()
+
+    def _login_and_fetch() -> None:
+        client.login(username, password)
+        client.fetch_usage()
+
+    await hass.async_add_executor_job(_login_and_fetch)
+    return _entry_data(client, username, password)
 
 
 async def _validate_mfa(
@@ -66,18 +70,7 @@ async def _validate_mfa(
         client.fetch_usage()
 
     await hass.async_add_executor_job(_submit_and_fetch)
-    session = client.session
-    if session is None:
-        raise UsageError("session missing after MFA")
-    data = {
-        CONF_USERNAME: username,
-        CONF_PASSWORD: password,
-        CONF_ACCESS_TOKEN: session.access_token,
-        CONF_ID_TOKEN: session.id_token,
-    }
-    if session.refresh_token:
-        data[CONF_REFRESH_TOKEN] = session.refresh_token
-    return data
+    return _entry_data(client, username, password)
 
 
 def _auth_error_key(exc: AuthError) -> str:
@@ -91,11 +84,33 @@ def _auth_error_key(exc: AuthError) -> str:
 class SpGroupConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
-    async def _show_mfa(self) -> config_entries.ConfigFlowResult:
+    def _mfa_form(
+        self, errors: dict[str, str] | None = None
+    ) -> config_entries.ConfigFlowResult:
         return self.async_show_form(
             step_id="mfa",
             data_schema=vol.Schema({vol.Required(CONF_MFA_CODE): str}),
+            errors=errors,
         )
+
+    def _start_mfa(
+        self,
+        exc: AuthError,
+        user_input: dict[str, Any],
+        mode: str,
+        entry: config_entries.ConfigEntry | None = None,
+    ) -> config_entries.ConfigFlowResult | None:
+        """The OTP form when Auth0 asked for a code, else None to report the error."""
+        if exc.error != "mfa_required" or not exc.mfa_token:
+            return None
+        self._mfa_context = {
+            CONF_USERNAME: user_input[CONF_USERNAME],
+            CONF_PASSWORD: user_input[CONF_PASSWORD],
+            "mfa_token": exc.mfa_token,
+            "mode": mode,
+            "entry": entry,
+        }
+        return self._mfa_form()
 
     async def async_step_mfa(
         self, user_input: dict[str, Any] | None = None
@@ -121,11 +136,7 @@ class SpGroupConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     return self.async_create_entry(title="SP Group", data=data)
                 entry = context["entry"]
                 return self.async_update_reload_and_abort(entry, data_updates=data)
-        return self.async_show_form(
-            step_id="mfa",
-            data_schema=vol.Schema({vol.Required(CONF_MFA_CODE): str}),
-            errors=errors,
-        )
+        return self._mfa_form(errors)
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -141,18 +152,11 @@ class SpGroupConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     user_input[CONF_PASSWORD],
                 )
             except AuthError as exc:
-                if exc.error == "mfa_required" and exc.mfa_token:
-                    self._mfa_context = {
-                        CONF_USERNAME: user_input[CONF_USERNAME],
-                        CONF_PASSWORD: user_input[CONF_PASSWORD],
-                        "mfa_token": exc.mfa_token,
-                        "mode": "user",
-                    }
-                    return await self._show_mfa()
+                mfa = self._start_mfa(exc, user_input, "user")
+                if mfa is not None:
+                    return mfa
                 errors["base"] = _auth_error_key(exc)
-            except UsageError:
-                errors["base"] = "cannot_connect"
-            except OSError:
+            except (UsageError, OSError):
                 errors["base"] = "cannot_connect"
             else:
                 return self.async_create_entry(
@@ -183,15 +187,9 @@ class SpGroupConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     user_input[CONF_PASSWORD],
                 )
             except AuthError as exc:
-                if exc.error == "mfa_required" and exc.mfa_token:
-                    self._mfa_context = {
-                        CONF_USERNAME: user_input[CONF_USERNAME],
-                        CONF_PASSWORD: user_input[CONF_PASSWORD],
-                        "mfa_token": exc.mfa_token,
-                        "mode": "reauth",
-                        "entry": reauth_entry,
-                    }
-                    return await self._show_mfa()
+                mfa = self._start_mfa(exc, user_input, "reauth", reauth_entry)
+                if mfa is not None:
+                    return mfa
                 errors["base"] = _auth_error_key(exc)
             except (UsageError, OSError):
                 errors["base"] = "cannot_connect"
@@ -228,15 +226,9 @@ class SpGroupConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     user_input[CONF_PASSWORD],
                 )
             except AuthError as exc:
-                if exc.error == "mfa_required" and exc.mfa_token:
-                    self._mfa_context = {
-                        CONF_USERNAME: user_input[CONF_USERNAME],
-                        CONF_PASSWORD: user_input[CONF_PASSWORD],
-                        "mfa_token": exc.mfa_token,
-                        "mode": "reconfigure",
-                        "entry": entry,
-                    }
-                    return await self._show_mfa()
+                mfa = self._start_mfa(exc, user_input, "reconfigure", entry)
+                if mfa is not None:
+                    return mfa
                 errors["base"] = _auth_error_key(exc)
             except (UsageError, OSError):
                 errors["base"] = "cannot_connect"

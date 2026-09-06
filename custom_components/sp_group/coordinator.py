@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import suppress
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
@@ -13,7 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .client import AuthError, SpGroupClient, UsageError, UsageReadings, UtilitySeries
+from .client import AuthError, SpGroupClient, UsageError
 from .const import (
     CONF_ACCESS_TOKEN,
     CONF_ID_TOKEN,
@@ -25,7 +26,11 @@ from .const import (
     UNIT_KWH,
     UNIT_SGD,
     UPDATE_INTERVAL,
+    translated_error,
 )
+from .history import cumulative_points, monthly_bill_points
+from .mapper import electricity_graph_periods
+from .models import UsageReadings
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,15 +54,32 @@ class SpGroupCoordinator(DataUpdateCoordinator[UsageReadings]):
     def mark_platforms_ready(self) -> None:
         self._platforms_ready = True
 
+    async def async_stop_stats_import(self) -> None:
+        """Cancel an import still writing statistics when the entry goes away."""
+        self._platforms_ready = False
+        task = self._stats_task
+        self._stats_task = None
+        if task is None or task.done():
+            return
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
     async def _async_update_data(self) -> UsageReadings:
         try:
             usage = await self.hass.async_add_executor_job(self.client.fetch_usage)
         except AuthError as exc:
             if exc.error == "requires_verification":
-                raise UpdateFailed(str(exc)) from exc
-            raise ConfigEntryAuthFailed(str(exc)) from exc
+                raise UpdateFailed(
+                    str(exc), **translated_error("requires_verification", exc)
+                ) from exc
+            raise ConfigEntryAuthFailed(
+                str(exc), **translated_error("auth_failed", exc)
+            ) from exc
         except UsageError as exc:
-            raise UpdateFailed(str(exc)) from exc
+            raise UpdateFailed(
+                str(exc), **translated_error("usage_failed", exc)
+            ) from exc
         self._persist_session_if_changed()
         if self._platforms_ready:
             self._schedule_stats_import()
@@ -108,8 +130,6 @@ class SpGroupCoordinator(DataUpdateCoordinator[UsageReadings]):
     def _history_series(
         self, usage: UsageReadings
     ) -> list[tuple[str, tuple, str, str]]:
-        from .mapper import electricity_graph_periods
-
         series: list[tuple[str, tuple, str, str]] = []
         if usage.electricity is not None:
             periods = electricity_graph_periods(usage)
@@ -127,7 +147,7 @@ class SpGroupCoordinator(DataUpdateCoordinator[UsageReadings]):
                     SENSOR_KEY_GAS,
                     usage.gas.periods,
                     usage.gas.unit,
-                    _unit_class(usage.gas),
+                    "energy" if usage.gas.unit == UNIT_KWH else "volume",
                 )
             )
         return series
@@ -138,8 +158,6 @@ class SpGroupCoordinator(DataUpdateCoordinator[UsageReadings]):
         )
         from homeassistant.components.recorder.statistics import async_import_statistics
         from homeassistant.helpers import entity_registry as er
-
-        from .history import cumulative_points, monthly_bill_points
 
         registry = er.async_get(self.hass)
         for key, periods, unit, unit_class in self._history_series(usage):
@@ -192,9 +210,3 @@ class SpGroupCoordinator(DataUpdateCoordinator[UsageReadings]):
                 for point in bill_points
             ]
             async_import_statistics(self.hass, metadata, stats)
-
-
-def _unit_class(series: UtilitySeries) -> str:
-    if series.unit == UNIT_KWH:
-        return "energy"
-    return "volume"

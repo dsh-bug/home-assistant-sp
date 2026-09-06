@@ -86,7 +86,6 @@ class FixtureTransport:
             if self.require_mfa and request_body.get("grant_type") == AUTH0_GRANT_TYPE:
                 return HttpResponse(
                     status=403,
-                    headers={"Content-Type": "application/json"},
                     body=load_fixture("oauth_token_mfa_required.json"),
                 )
             if (
@@ -95,24 +94,20 @@ class FixtureTransport:
             ):
                 return HttpResponse(
                     status=200,
-                    headers={"Content-Type": "application/json"},
                     body=load_fixture("oauth_token_mfa_success.json"),
                 )
             if self.fail_login:
                 return HttpResponse(
                     status=403,
-                    headers={"Content-Type": "application/json"},
                     body=load_fixture("oauth_token_invalid_grant.json"),
                 )
             return HttpResponse(
                 status=200,
-                headers={"Content-Type": "application/json"},
                 body=load_fixture("oauth_token_success.json"),
             )
         if method == "GET" and origin == B2C_HOST and path == JARVIS_ME_PATH:
             return HttpResponse(
                 status=200,
-                headers={"Content-Type": "application/json"},
                 body=load_fixture(self.me_fixture),
             )
         if (
@@ -122,7 +117,6 @@ class FixtureTransport:
         ):
             return HttpResponse(
                 status=200,
-                headers={"Content-Type": "application/json"},
                 body=load_fixture(self.charts_fixture),
             )
         if (
@@ -131,10 +125,9 @@ class FixtureTransport:
             and path.startswith(f"{JARVIS_SMRD_PATH}/")
         ):
             if self.smrd_fixture is None:
-                return HttpResponse(status=404, headers={}, body=b"{}")
+                return HttpResponse(status=404, body=b"{}")
             return HttpResponse(
                 status=200,
-                headers={"Content-Type": "application/json"},
                 body=load_fixture(self.smrd_fixture),
             )
         if method == "POST" and origin == B2C_HOST and path == JARVIS_AMI_PATH:
@@ -149,7 +142,6 @@ class FixtureTransport:
             )
             return HttpResponse(
                 status=200,
-                headers={"Content-Type": "application/json"},
                 body=load_fixture(name),
             )
         if (
@@ -159,28 +151,24 @@ class FixtureTransport:
         ):
             return HttpResponse(
                 status=401,
-                headers={"Content-Type": "application/json"},
                 body=b'{"error":"no_ppms_account"}',
             )
         if method == "GET" and origin == B2C_HOST and path == JARVIS_GREEN_GOALS_PATH:
             return HttpResponse(
                 status=200,
-                headers={"Content-Type": "application/json"},
                 body=load_fixture("jarvis_greengoals.json"),
             )
         if method == "GET" and origin == B2C_HOST and path == NJORD_PAYABLES_PATH:
             return HttpResponse(
                 status=200,
-                headers={"Content-Type": "application/json"},
                 body=load_fixture("njord_payables.json"),
             )
         if method == "GET" and origin == B2C_HOST and path == NJORD_HISTORY_PATH:
             return HttpResponse(
                 status=200,
-                headers={"Content-Type": "application/json"},
                 body=load_fixture("njord_history.json"),
             )
-        return HttpResponse(status=404, headers={}, body=b"{}")
+        return HttpResponse(status=404, body=b"{}")
 
 
 def billed_totals_from_charts_payload(

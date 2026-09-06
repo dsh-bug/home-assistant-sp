@@ -1,6 +1,6 @@
 [project]
 name = "home-assistant-sp"
-version = "1.3.0"
+version = "1.4.0"
 description = "Home Assistant custom integration for SP Group electricity, water, and gas"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -40,6 +40,7 @@ files = [
     "custom_components/sp_group/mapper.py",
     "custom_components/sp_group/const.py",
     "custom_components/sp_group/history.py",
+    "custom_components/sp_group/models.py",
 ]
 
 [[tool.mypy.overrides]]

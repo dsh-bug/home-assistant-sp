@@ -31,7 +31,11 @@ from custom_components.sp_group.const import (
     UNIT_M3,
     UNIT_SGD,
 )
-from custom_components.sp_group.mapper import extra_attributes, sensors_from_usage
+from custom_components.sp_group.mapper import (
+    _currency,
+    extra_attributes,
+    sensors_from_usage,
+)
 
 from .conftest import (
     FixtureTransport,
@@ -129,3 +133,10 @@ def test_failed_auth_does_not_yield_sensor_values() -> None:
     with pytest.raises(AuthError):
         client.login("user@example.com", "wrong")
     assert sensors_from_usage(None) == []
+
+
+def test_amount_due_unit_follows_the_payable_currency() -> None:
+    """Monetary sensors carry the ISO code the API reported, not a fixed SGD."""
+    assert _currency("usd") == "USD"
+    assert _currency(None) == UNIT_SGD
+    assert _currency("S$") == UNIT_SGD

@@ -18,12 +18,15 @@ from custom_components.sp_group.client import (
     _tariff_consumption,
 )
 from custom_components.sp_group.const import (
+    DEVICE_CLASS_TEMPERATURE,
     EVA_LATEST_SESSION_PATH,
     OPTIONAL_HTTP_TIMEOUT_SECONDS,
     SENSOR_KEY_EV_LAST_CHARGE,
+    SENSOR_KEY_FCU,
     SENSOR_KEY_GREENUP_POINTS,
     SENSOR_KEY_UNREAD_NOTIFICATIONS,
     TARIFF_DEFAULT_CONSUMPTION_KWH,
+    UNIT_CELSIUS,
 )
 from custom_components.sp_group.mapper import sensors_from_usage
 
@@ -41,7 +44,6 @@ def test_greenup_and_unread_appear_when_payloads_exist() -> None:
             if method == "POST" and parsed.path == "/1up/authenticated/graphql":
                 return HttpResponse(
                     200,
-                    {"Content-Type": "application/json"},
                     json.dumps(
                         {
                             "data": {
@@ -65,13 +67,11 @@ def test_greenup_and_unread_appear_when_payloads_exist() -> None:
             if method == "GET" and parsed.path == "/notifications/v1/notifications":
                 return HttpResponse(
                     200,
-                    {"Content-Type": "application/json"},
                     b'{"total_unread_notifications": 3}',
                 )
             if method == "GET" and parsed.path == "/eva/v2/order/receipts":
                 return HttpResponse(
                     200,
-                    {"Content-Type": "application/json"},
                     json.dumps(
                         {
                             "data": [
@@ -144,7 +144,6 @@ def test_eva_scope_not_found_skips_remaining_eva() -> None:
                 if parsed.path == EVA_LATEST_SESSION_PATH:
                     return HttpResponse(
                         403,
-                        {"Content-Type": "application/json"},
                         b'{"error":"scope_not_found"}',
                     )
                 raise AssertionError(f"eva call after deny: {parsed.path}")
@@ -181,7 +180,6 @@ def test_paired_fcus_each_get_a_sensor() -> None:
             if method == "POST" and parsed.path == "/frosty/graphql":
                 return HttpResponse(
                     200,
-                    {"Content-Type": "application/json"},
                     json.dumps(
                         {
                             "data": {
@@ -204,7 +202,6 @@ def test_paired_fcus_each_get_a_sensor() -> None:
                 temp = 24.5 if thing == "tengah-living" else 22.0
                 return HttpResponse(
                     200,
-                    {"Content-Type": "application/json"},
                     json.dumps(
                         {
                             "is_on": True,
@@ -226,6 +223,10 @@ def test_paired_fcus_each_get_a_sensor() -> None:
     assert living.name == "Living"
     assert bed.native_value == 22.0
     assert bed.name == "Bedroom"
+    # Temperature device class so Home Assistant converts to the user unit system.
+    assert living.device_class == DEVICE_CLASS_TEMPERATURE
+    assert living.unit_of_measurement == UNIT_CELSIUS
+    assert living.translation_key == SENSOR_KEY_FCU
 
 
 def test_tariff_consumption_from_last_billed_kwh() -> None:
