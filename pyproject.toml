@@ -40,6 +40,7 @@ files = [
     "custom_components/sp_group/mapper.py",
     "custom_components/sp_group/const.py",
     "custom_components/sp_group/history.py",
+    "custom_components/sp_group/models.py",
 ]
 
 [[tool.mypy.overrides]]

@@ -87,8 +87,8 @@ Names below are the entity names. Unique id is `{premise_id}_{key}`. Optional ro
 | EV last charge | `ev_last_charge` | Eva receipts list is non-empty |
 | EV unpaid | `ev_unpaid` | Eva unpaid orders list is non-empty |
 | Unread notifications | `unread_notifications` | Notifications API returns a count |
-| Bill delivery | `bill_delivery` | Skalbox preferences exist (`e-bill` or `paper`) |
-| FCU | `fcu_{thing}` | One sensor per Frosty paired Tengah coil |
+| Bill delivery | `bill_delivery` | Skalbox preferences exist. State is `ebill` or `paper`, displayed through the translation catalog |
+| FCU | `fcu_{thing}` | One sensor per Frosty paired Tengah coil. Room temperature, else `on` / `off` |
 | SP tariff | `tariff` | Public priceplan `sp_kwh_price`. Query uses last billed kWh, else 350 |
 | Account | `account` | Always. Status plus address, account number, AMI flag, retailer, next meter-reading window |
 
@@ -159,3 +159,30 @@ uv run python scripts/launch_client.py
 ```
 
 Optional live call: `SP_USERNAME` and `SP_PASSWORD`.
+
+`tests/test_fuzz.py` fuzzes the response parsers: it corrupts one node of a
+recorded fixture per round and asserts that only `UsageError` or `AuthError`
+escapes, that every float reaching a sensor is finite, and that every timestamp
+converts to SGT. `FUZZ_SEED` fixes the mutation sequence, so a failure names the
+seed and round that produced it; paste an offending payload into a case in
+`tests/` to keep it as a regression.
+
+### Modules
+
+`custom_components/sp_group/`, listed in dependency order. Each module may import
+those above it, never those below.
+
+| Module | Holds |
+|---|---|
+| `const.py` | Hosts, API paths, Auth0 parameters, sensor keys, units |
+| `models.py` | Frozen dataclasses for premise, usage, bills, meters, EV, FCU |
+| `history.py` | Period arithmetic: fold, trim, merge, cumulative, monthly |
+| `mapper.py` | Usage readings to sensor specs and entity attributes |
+| `client.py` | Auth0 login, MFA, refresh, HTTP transport, JSON to models |
+| `coordinator.py` | 30-minute poll, session persistence, statistics import |
+| `entity.py` `sensor.py` `config_flow.py` `diagnostics.py` | Home Assistant surfaces |
+
+`const.py` through `client.py` import no Home Assistant code and are what the
+tests cover; `mypy --strict` gates them via `[tool.mypy] files`. The package
+`__init__.py` imports Home Assistant inside `async_setup_entry` so the modules
+above stay importable without it.

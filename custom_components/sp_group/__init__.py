@@ -1,4 +1,10 @@
-"""SP Group Home Assistant integration."""
+"""SP Group Home Assistant integration.
+
+Setup imports homeassistant and the sibling modules inside ``async_setup_entry``
+rather than at module scope: this is the package ``__init__``, so every
+``custom_components.sp_group.*`` import runs it, and the tests exercise the
+client, mapper, and history modules without homeassistant installed.
+"""
 
 # mypy: ignore-errors
 
@@ -6,7 +12,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .const import DOMAIN
+from .const import DOMAIN, translated_error
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -21,7 +27,7 @@ PLATFORMS = ["sensor"]
 __all__ = ["DOMAIN", "PLATFORMS"]
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: SpGroupConfigEntry) -> bool:
     from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 
     from .client import AuthError, Session, SpGroupClient, UsageError
@@ -47,10 +53,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await coordinator.async_config_entry_first_refresh()
     except AuthError as exc:
         if exc.error == "requires_verification":
-            raise ConfigEntryNotReady(str(exc)) from exc
-        raise ConfigEntryAuthFailed(str(exc)) from exc
+            raise ConfigEntryNotReady(
+                str(exc), **translated_error("requires_verification", exc)
+            ) from exc
+        raise ConfigEntryAuthFailed(
+            str(exc), **translated_error("auth_failed", exc)
+        ) from exc
     except UsageError as exc:
-        raise ConfigEntryNotReady(str(exc)) from exc
+        raise ConfigEntryNotReady(
+            str(exc), **translated_error("usage_failed", exc)
+        ) from exc
     entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     coordinator.mark_platforms_ready()
@@ -58,5 +70,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: SpGroupConfigEntry) -> bool:
+    await entry.runtime_data.async_stop_stats_import()
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

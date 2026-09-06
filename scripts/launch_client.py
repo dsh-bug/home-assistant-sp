@@ -46,13 +46,11 @@ class LaunchFixtureTransport:
         if method == "POST" and origin == IDENTITY_HOST and path == OAUTH_TOKEN_PATH:
             return HttpResponse(
                 200,
-                {"Content-Type": "application/json"},
                 (FIXTURES / "oauth_token_success.json").read_bytes(),
             )
         if method == "GET" and origin == B2C_HOST and path == JARVIS_ME_PATH:
             return HttpResponse(
                 200,
-                {"Content-Type": "application/json"},
                 (FIXTURES / "jarvis_me.json").read_bytes(),
             )
         if (
@@ -62,10 +60,10 @@ class LaunchFixtureTransport:
         ):
             return HttpResponse(
                 200,
-                {"Content-Type": "application/json"},
                 (FIXTURES / "jarvis_charts.json").read_bytes(),
             )
-        raise LookupError(f"unexpected {method} {url}")
+        # Everything past me/charts is optional; 404 is the client's skip signal.
+        return HttpResponse(404, b"{}")
 
 
 def main() -> None:

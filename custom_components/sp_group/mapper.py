@@ -6,11 +6,11 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 
-from .client import SG_TZ, FcuInfo, PeriodReading, UsageReadings, UtilitySeries
 from .const import (
     DEVICE_CLASS_ENERGY,
     DEVICE_CLASS_GAS,
     DEVICE_CLASS_MONETARY,
+    DEVICE_CLASS_TEMPERATURE,
     DEVICE_CLASS_WATER,
     ENTITY_CATEGORY_DIAGNOSTIC,
     SENSOR_KEY_ACCOUNT,
@@ -38,14 +38,20 @@ from .const import (
     SENSOR_KEY_WATER_GOAL,
     SENSOR_KEY_WATER_LAST,
     SENSOR_KEY_WATER_METER,
+    SENSOR_STATE_EBILL,
+    SENSOR_STATE_OFF,
+    SENSOR_STATE_ON,
+    SENSOR_STATE_PAPER,
     STATE_CLASS_MEASUREMENT,
     STATE_CLASS_TOTAL,
     STATE_CLASS_TOTAL_INCREASING,
+    UNIT_CELSIUS,
     UNIT_KWH,
     UNIT_M3,
     UNIT_SGD,
 )
 from .history import fold_half_hours, merge_ami_periods, trim_unreported
+from .models import SG_TZ, FcuInfo, PeriodReading, UsageReadings, UtilitySeries
 
 
 @dataclass(frozen=True)
@@ -62,6 +68,12 @@ class SensorSpec:
 
 
 _FCU_KEY_SAFE = re.compile(r"[^0-9A-Za-z]+")
+_ISO_CURRENCY = re.compile(r"^[A-Za-z]{3}$")
+
+
+def _currency(code: str | None) -> str:
+    """ISO 4217 code the amount is in, so it is not labelled SGD when it is not."""
+    return code.upper() if code and _ISO_CURRENCY.match(code) else UNIT_SGD
 
 
 def _fcu_sensor_key(thing_name: str) -> str:
@@ -86,16 +98,6 @@ def _last_period(periods: tuple[PeriodReading, ...]) -> PeriodReading | None:
 
 def _omit_none(attrs: dict[str, object]) -> dict[str, object]:
     return {key: value for key, value in attrs.items() if value is not None}
-
-
-def _series_device_class(series: UtilitySeries, kind: str) -> str:
-    if kind == "elec":
-        return DEVICE_CLASS_ENERGY
-    if kind == "water":
-        return DEVICE_CLASS_WATER
-    if series.unit == UNIT_KWH:
-        return DEVICE_CLASS_ENERGY
-    return DEVICE_CLASS_GAS
 
 
 def reported_ami_slots(usage: UsageReadings) -> tuple[PeriodReading, ...]:
@@ -125,11 +127,6 @@ def _last_interval(usage: UsageReadings) -> PeriodReading | None:
     if not slots:
         return None
     return max(slots, key=lambda item: item.start)
-
-
-def _last_hour_kwh(usage: UsageReadings) -> float | None:
-    last = _last_interval(usage)
-    return last.amount if last is not None else None
 
 
 def extra_attributes(usage: UsageReadings, key: str) -> dict[str, object]:
@@ -170,28 +167,16 @@ def extra_attributes(usage: UsageReadings, key: str) -> dict[str, object]:
             attrs["giro_enabled"] = due.giro_enabled
             attrs["recurring_enabled"] = due.recurring_enabled
         return _omit_none(attrs)
-    if key == SENSOR_KEY_ELECTRICITY_METER:
-        meter = usage.meter("electric")
+    if key in {SENSOR_KEY_ELECTRICITY_METER, SENSOR_KEY_WATER_METER}:
+        meter = usage.meter(
+            "electric" if key == SENSOR_KEY_ELECTRICITY_METER else "water"
+        )
         if meter is not None:
             attrs["meter_id"] = meter.meter_id
             attrs["last_actual_at"] = meter.last_actual_at
         return _omit_none(attrs)
-    if key == SENSOR_KEY_WATER_METER:
-        meter = usage.meter("water")
-        if meter is not None:
-            attrs["meter_id"] = meter.meter_id
-            attrs["last_actual_at"] = meter.last_actual_at
-        return _omit_none(attrs)
-    if key == SENSOR_KEY_ELECTRICITY_GOAL:
-        goal = usage.goal("elec")
-        if goal is not None:
-            attrs["goal_month"] = goal.month
-            attrs["goal_target"] = goal.target
-            attrs["percent_difference"] = goal.percent_difference
-            attrs["cost_difference_sgd"] = goal.cost_difference_sgd
-        return _omit_none(attrs)
-    if key == SENSOR_KEY_WATER_GOAL:
-        goal = usage.goal("water")
+    if key in {SENSOR_KEY_ELECTRICITY_GOAL, SENSOR_KEY_WATER_GOAL}:
+        goal = usage.goal("elec" if key == SENSOR_KEY_ELECTRICITY_GOAL else "water")
         if goal is not None:
             attrs["goal_month"] = goal.month
             attrs["goal_target"] = goal.target
@@ -348,13 +333,13 @@ def sensors_from_usage(usage: UsageReadings | None) -> list[SensorSpec]:
                     suggested_display_precision=2,
                 )
             )
-        hour = _last_hour_kwh(usage)
-        if hour is not None:
+        last_slot = _last_interval(usage)
+        if last_slot is not None:
             specs.append(
                 SensorSpec(
                     key=SENSOR_KEY_ELECTRICITY_HOUR,
                     translation_key=SENSOR_KEY_ELECTRICITY_HOUR,
-                    native_value=hour,
+                    native_value=last_slot.amount,
                     device_class=None,
                     state_class=STATE_CLASS_MEASUREMENT,
                     unit_of_measurement=UNIT_KWH,
@@ -375,8 +360,9 @@ def sensors_from_usage(usage: UsageReadings | None) -> list[SensorSpec]:
         )
         specs.append(_last_spec(SENSOR_KEY_WATER_LAST, usage.water, 2))
     if usage.gas is not None:
-        gas_class = _series_device_class(usage.gas, "gas")
-        precision = 1 if usage.gas.unit == UNIT_KWH else 2
+        is_kwh = usage.gas.unit == UNIT_KWH
+        gas_class = DEVICE_CLASS_ENERGY if is_kwh else DEVICE_CLASS_GAS
+        precision = 1 if is_kwh else 2
         specs.append(
             SensorSpec(
                 key=SENSOR_KEY_GAS,
@@ -433,7 +419,7 @@ def sensors_from_usage(usage: UsageReadings | None) -> list[SensorSpec]:
                 native_value=usage.amount_due.amount_sgd,
                 device_class=DEVICE_CLASS_MONETARY,
                 state_class=None,
-                unit_of_measurement=UNIT_SGD,
+                unit_of_measurement=_currency(usage.amount_due.currency),
                 suggested_display_precision=2,
             )
         )
@@ -572,10 +558,12 @@ def sensors_from_usage(usage: UsageReadings | None) -> list[SensorSpec]:
             )
         )
     if usage.bill_delivery is not None:
-        delivery = "e-bill" if usage.bill_delivery.soft_copy else "paper"
+        delivery = (
+            SENSOR_STATE_EBILL if usage.bill_delivery.soft_copy else SENSOR_STATE_PAPER
+        )
         hard = usage.bill_delivery.hard_copy is True
         if usage.bill_delivery.soft_copy is None and hard:
-            delivery = "paper"
+            delivery = SENSOR_STATE_PAPER
         specs.append(
             SensorSpec(
                 key=SENSOR_KEY_BILL_DELIVERY,
@@ -594,11 +582,13 @@ def sensors_from_usage(usage: UsageReadings | None) -> list[SensorSpec]:
                 key=_fcu_sensor_key(fcu.thing_name),
                 translation_key=SENSOR_KEY_FCU,
                 native_value=(
-                    fcu.room_temperature if has_temp else ("on" if fcu.is_on else "off")
+                    fcu.room_temperature
+                    if has_temp
+                    else (SENSOR_STATE_ON if fcu.is_on else SENSOR_STATE_OFF)
                 ),
-                device_class=None,
+                device_class=DEVICE_CLASS_TEMPERATURE if has_temp else None,
                 state_class=STATE_CLASS_MEASUREMENT if has_temp else None,
-                unit_of_measurement="°C" if has_temp else None,
+                unit_of_measurement=UNIT_CELSIUS if has_temp else None,
                 suggested_display_precision=1,
                 name=fcu.display_name or fcu.thing_name,
             )

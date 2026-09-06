@@ -63,8 +63,17 @@ ACCEPT_LANGUAGE = "en_US"
 
 HTTP_TIMEOUT_SECONDS = 30
 OPTIONAL_HTTP_TIMEOUT_SECONDS = 8
+
+# Auth0 /oauth/token statuses that are a verdict on the credentials. Anything
+# else (429, 5xx) is the identity host being unavailable.
+AUTH_REJECT_STATUSES = frozenset({400, 401, 403})
+
 TARIFF_DEFAULT_CONSUMPTION_KWH = 350
 EVA_INTEGER_CENTS_MIN = 100
+
+# How much of an offending value a parse error quotes back, so a hostile
+# response cannot push a megabyte of text into the log.
+ERROR_VALUE_CHARS = 60
 
 UPDATE_INTERVAL = timedelta(minutes=30)
 
@@ -72,12 +81,14 @@ DEVICE_CLASS_ENERGY = "energy"
 DEVICE_CLASS_WATER = "water"
 DEVICE_CLASS_GAS = "gas"
 DEVICE_CLASS_MONETARY = "monetary"
+DEVICE_CLASS_TEMPERATURE = "temperature"
 STATE_CLASS_TOTAL_INCREASING = "total_increasing"
 STATE_CLASS_TOTAL = "total"
 STATE_CLASS_MEASUREMENT = "measurement"
 UNIT_KWH = "kWh"
 UNIT_M3 = "m³"
 UNIT_SGD = "SGD"
+UNIT_CELSIUS = "°C"
 ENTITY_CATEGORY_DIAGNOSTIC = "diagnostic"
 
 SENSOR_KEY_ELECTRICITY = "electricity"
@@ -107,3 +118,21 @@ SENSOR_KEY_UNREAD_NOTIFICATIONS = "unread_notifications"
 SENSOR_KEY_BILL_DELIVERY = "bill_delivery"
 SENSOR_KEY_FCU = "fcu"
 SENSOR_KEY_TARIFF = "tariff"
+
+# States this integration generates itself. Each one needs a matching
+# entity.sensor.<key>.state entry in strings.json, or the raw value shows
+# untranslated. Values reported by SP (account status, EV session) are passed
+# through and cannot be translated.
+SENSOR_STATE_EBILL = "ebill"
+SENSOR_STATE_PAPER = "paper"
+SENSOR_STATE_ON = "on"
+SENSOR_STATE_OFF = "off"
+
+
+def translated_error(key: str, exc: Exception) -> dict[str, object]:
+    """Kwargs that show the matching strings.json exceptions entry, user language."""
+    return {
+        "translation_domain": DOMAIN,
+        "translation_key": key,
+        "translation_placeholders": {"error": str(exc)},
+    }

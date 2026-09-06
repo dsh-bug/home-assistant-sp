@@ -15,11 +15,14 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
+import math
 import ssl
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
+from http.client import HTTPException
 from typing import Protocol
 from urllib.error import HTTPError
 from urllib.parse import urlencode
@@ -39,9 +42,11 @@ from .const import (
     AUTH0_REALM,
     AUTH0_REFRESH_GRANT,
     AUTH0_SCOPE,
+    AUTH_REJECT_STATUSES,
     B2C_HOST,
     BILL_PREFERENCES_PATH,
     CONTENT_TYPE_JSON,
+    ERROR_VALUE_CHARS,
     EVA_CHARGE_HISTORY_PATH,
     EVA_INTEGER_CENTS_MIN,
     EVA_LATEST_SESSION_PATH,
@@ -70,6 +75,29 @@ from .const import (
     TYCHE_WALLET_PATH,
     USER_AGENT,
 )
+from .models import (
+    SG_TZ,
+    BillDeliveryInfo,
+    BillInfo,
+    EvChargeInfo,
+    EvSessionInfo,
+    EvUnpaidInfo,
+    EvWalletInfo,
+    FcuInfo,
+    GreenGoal,
+    GreenUpInfo,
+    MeterReadingInfo,
+    MeterRegister,
+    OptionalReads,
+    PayableInfo,
+    PeriodReading,
+    PremiseInfo,
+    TariffInfo,
+    UsageReadings,
+    UtilitySeries,
+)
+
+_LOGGER = logging.getLogger(__name__)
 
 GREENUP_ACCOUNT_QUERY = (
     "query { account { node { totalPoints projectedLevelStatus "
@@ -98,10 +126,19 @@ class UsageError(Exception):
     """Usage payload missing billed utility readings."""
 
 
+class TransportError(UsageError):
+    """An SP Group host could not be reached, or returned no usable response.
+
+    A ``UsageError`` so callers that already treat a bad read as a retriable
+    update failure (coordinator, config flow) keep doing so: a DNS failure, a
+    connect timeout, or a 5xx from the token endpoint is transient and must not
+    be reported to the user as bad credentials.
+    """
+
+
 @dataclass(frozen=True)
 class HttpResponse:
     status: int
-    headers: Mapping[str, str]
     body: bytes
 
 
@@ -132,17 +169,17 @@ class UrllibTransport:
         seconds = HTTP_TIMEOUT_SECONDS if timeout is None else timeout
         try:
             with urlopen(request, timeout=seconds, context=context) as response:
-                return HttpResponse(
-                    status=int(response.status),
-                    headers={k: v for k, v in response.headers.items()},
-                    body=response.read(),
-                )
+                return HttpResponse(status=int(response.status), body=response.read())
         except HTTPError as exc:
-            return HttpResponse(
-                status=int(exc.code),
-                headers={k: v for k, v in (exc.headers.items() if exc.headers else [])},
-                body=exc.read(),
-            )
+            with exc:
+                return HttpResponse(status=int(exc.code), body=exc.read())
+        except (OSError, HTTPException) as exc:
+            # URLError, socket timeout, and TLS failures all land here. Name the
+            # call and the timeout so the log says which host stalled the poll.
+            raise TransportError(
+                f"{method} {url.split('?', 1)[0]} failed"
+                f" (timeout {seconds}s): {exc}"
+            ) from exc
 
 
 @dataclass(frozen=True)
@@ -160,236 +197,20 @@ class Session:
         return current >= self.expires_at - TOKEN_EXPIRY_BUFFER_SECONDS
 
 
-SG_TZ = timezone(timedelta(hours=8))
-
-
-@dataclass(frozen=True)
-class PeriodReading:
-    start: datetime
-    amount: float
-    previous: float | None = None
-    status: str | None = None
-
-
-@dataclass(frozen=True)
-class UtilitySeries:
-    total: float
-    unit: str
-    periods: tuple[PeriodReading, ...]
-    average: float | None
-    comparison: str | None
-
-
-@dataclass(frozen=True)
-class PremiseInfo:
-    id: str
-    address: str | None
-    account_number: str | None
-    account_status: str | None
-    account_type: str | None
-    premise_type: str | None
-    utilities: tuple[str, ...]
-    ami_elec: bool | None
-    retailer_name: str | None
-    ppms_exists: bool
-
-
-@dataclass(frozen=True)
-class MeterReadingInfo:
-    message: str | None
-    title: str | None
-    start: str | None
-    end: str | None
-
-
-@dataclass(frozen=True)
-class BillInfo:
-    amount_sgd: float
-    date: str | None
-    period: str | None
-    due_date: str | None
-    account_number: str | None
-    issued_at: datetime | None = None
-
-
-@dataclass(frozen=True)
-class PayableInfo:
-    amount_sgd: float
-    currency: str | None
-    giro_enabled: bool | None
-    recurring_enabled: bool | None
-
-
-@dataclass(frozen=True)
-class MeterRegister:
-    utility: str
-    meter_id: str | None
-    value: float
-    last_actual_at: str | None
-
-
-@dataclass(frozen=True)
-class GreenGoal:
-    kind: str
-    month: str | None
-    used: float
-    target: float
-    percent_difference: float | None
-    cost_difference_sgd: float | None
-    unit: str
-
-
-@dataclass(frozen=True)
-class GreenUpInfo:
-    points: float
-    tier_name: str | None
-    tier_level: float | None
-    points_to_level_up: float | None
-
-
-@dataclass(frozen=True)
-class EvWalletInfo:
-    points: float
-    dollar_balance: float | None
-    current_tier_id: float | None
-
-
-@dataclass(frozen=True)
-class EvSessionInfo:
-    status: str | None
-    kwh: float | None
-    total_cost: str | None
-    start: str | None
-    order_id: str | None
-
-
-@dataclass(frozen=True)
-class EvChargeInfo:
-    kwh: float | None
-    amount: float | None
-    created_at: str | None
-    status: str | None
-    address: str | None
-
-
-@dataclass(frozen=True)
-class EvUnpaidInfo:
-    count: int
-    amount: float | None
-
-
-@dataclass(frozen=True)
-class FcuInfo:
-    thing_name: str
-    display_name: str | None
-    is_on: bool | None
-    is_online: bool | None
-    room_temperature: float | None
-    setpoint: float | None
-    mode: str | None
-
-
-@dataclass(frozen=True)
-class BillDeliveryInfo:
-    soft_copy: bool | None
-    hard_copy: bool | None
-
-
-@dataclass(frozen=True)
-class TariffInfo:
-    kwh_price: float | None
-    monthly_price: float | None
-    consumption: str | None
-
-
-@dataclass(frozen=True)
-class OptionalReads:
-    greenup: GreenUpInfo | None = None
-    ev_wallet: EvWalletInfo | None = None
-    ev_session: EvSessionInfo | None = None
-    ev_last_charge: EvChargeInfo | None = None
-    ev_unpaid: EvUnpaidInfo | None = None
-    unread_notifications: int | None = None
-    bill_delivery: BillDeliveryInfo | None = None
-    fcus: tuple[FcuInfo, ...] = ()
-    tariff: TariffInfo | None = None
-
-
-@dataclass(frozen=True)
-class UsageReadings:
-    premise: PremiseInfo
-    electricity: UtilitySeries | None
-    water: UtilitySeries | None
-    gas: UtilitySeries | None
-    meter_reading: MeterReadingInfo | None = None
-    ppms_credit: float | None = None
-    ppms_updated_at: str | None = None
-    ami_hourly: tuple[PeriodReading, ...] = ()
-    ami_daily: tuple[PeriodReading, ...] = ()
-    last_bill: BillInfo | None = None
-    bills: tuple[BillInfo, ...] = ()
-    amount_due: PayableInfo | None = None
-    meter_registers: tuple[MeterRegister, ...] = ()
-    green_goals: tuple[GreenGoal, ...] = ()
-    greenup: GreenUpInfo | None = None
-    ev_wallet: EvWalletInfo | None = None
-    ev_session: EvSessionInfo | None = None
-    ev_last_charge: EvChargeInfo | None = None
-    ev_unpaid: EvUnpaidInfo | None = None
-    unread_notifications: int | None = None
-    bill_delivery: BillDeliveryInfo | None = None
-    fcus: tuple[FcuInfo, ...] = ()
-    tariff: TariffInfo | None = None
-
-    @property
-    def premise_id(self) -> str:
-        return self.premise.id
-
-    @property
-    def electricity_kwh(self) -> float:
-        return self.electricity.total if self.electricity else 0.0
-
-    @property
-    def water_m3(self) -> float:
-        return self.water.total if self.water else 0.0
-
-    @property
-    def electricity_unit(self) -> str:
-        return self.electricity.unit if self.electricity else "kWh"
-
-    @property
-    def water_unit(self) -> str:
-        return self.water.unit if self.water else "m³"
-
-    @property
-    def electricity_periods(self) -> tuple[PeriodReading, ...]:
-        return self.electricity.periods if self.electricity else ()
-
-    @property
-    def water_periods(self) -> tuple[PeriodReading, ...]:
-        return self.water.periods if self.water else ()
-
-    @property
-    def gas_periods(self) -> tuple[PeriodReading, ...]:
-        return self.gas.periods if self.gas else ()
-
-    def meter(self, utility: str) -> MeterRegister | None:
-        for item in self.meter_registers:
-            if item.utility == utility:
-                return item
-        return None
-
-    def goal(self, kind: str) -> GreenGoal | None:
-        for item in self.green_goals:
-            if item.kind == kind:
-                return item
-        return None
-
-
 def _decode_json(body: bytes) -> object:
     if not body:
         return {}
     return json.loads(body.decode("utf-8"))
+
+
+def _require_json(response: HttpResponse, label: str) -> object:
+    """Decode a response the read cannot continue without."""
+    try:
+        return _decode_json(response.body)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise UsageError(
+            f"{label} HTTP {response.status}: response was not JSON ({exc})"
+        ) from exc
 
 
 def _optional_json(response: HttpResponse) -> object | None:
@@ -415,33 +236,33 @@ def _eva_scope_denied(response: HttpResponse) -> bool:
     return error == "scope_not_found" or "scope_not_found" in description
 
 
+def _eva_integer_sgd(number: int) -> float | None:
+    """Integers at or above the threshold are cents; smaller ones are dollars."""
+    dollars = _optional_float(number)
+    if dollars is None:
+        return None
+    if abs(number) >= EVA_INTEGER_CENTS_MIN:
+        return round(dollars / 100.0, 2)
+    return dollars
+
+
 def _eva_sgd(value: object) -> float | None:
     """Eva money fields are Java String, not Njord integer cents."""
     if isinstance(value, bool) or value is None:
         return None
     if isinstance(value, float):
-        return round(value, 2)
+        return round(value, 2) if math.isfinite(value) else None
     if isinstance(value, int):
-        if abs(value) >= EVA_INTEGER_CENTS_MIN:
-            return round(value / 100.0, 2)
-        return float(value)
+        return _eva_integer_sgd(value)
     if isinstance(value, str) and value.strip():
         text = value.strip()
-        if "." in text:
+        if "." not in text:
             try:
-                return round(float(text), 2)
+                return _eva_integer_sgd(int(text))
             except ValueError:
-                return None
-        try:
-            number = int(text)
-        except ValueError:
-            try:
-                return round(float(text), 2)
-            except ValueError:
-                return None
-        if abs(number) >= EVA_INTEGER_CENTS_MIN:
-            return round(number / 100.0, 2)
-        return float(number)
+                pass
+        dollars = _optional_float(text)
+        return round(dollars, 2) if dollars is not None else None
     return None
 
 
@@ -462,26 +283,33 @@ def _require_mapping(value: object, label: str) -> dict[str, object]:
 
 
 def _float(value: object) -> float:
+    """Billed consumption: a malformed number fails the read, never reads as zero."""
     if isinstance(value, bool) or value is None:
         return 0.0
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str) and value:
-        return float(value)
-    return 0.0
+    if not isinstance(value, (int, float, str)) or value == "":
+        return 0.0
+    number = _optional_float(value)
+    if number is None:
+        raise UsageError(f"expected a number, got {repr(value)[:ERROR_VALUE_CHARS]}")
+    return number
 
 
 def _optional_float(value: object) -> float | None:
+    """None unless the value is a finite number.
+
+    json.loads accepts the NaN and Infinity literals, "1e400" parses to inf and
+    an out-of-range JSON integer overflows float(); none of the three can be a
+    sensor state.
+    """
     if isinstance(value, bool) or value is None:
         return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str) and value:
-        try:
-            return float(value)
-        except ValueError:
-            return None
-    return None
+    if not isinstance(value, (int, float, str)) or value == "":
+        return None
+    try:
+        number = float(value)
+    except (ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) else None
 
 
 def _optional_str(value: object) -> str | None:
@@ -585,6 +413,12 @@ def _parse_period_start(value: object) -> datetime | None:
         return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=SG_TZ)
+    try:
+        parsed.astimezone(SG_TZ)
+    except (OverflowError, OSError):
+        # Timestamps within a UTC offset of datetime.min/max cannot be shifted
+        # to SGT, and every downstream fold does exactly that.
+        return None
     return parsed
 
 
@@ -1145,8 +979,11 @@ class SpGroupClient:
         if current is not None and current.refresh_token:
             try:
                 return self.refresh()
-            except AuthError:
-                pass
+            except AuthError as exc:
+                raise AuthError(
+                    "invalid_grant",
+                    f"stored session expired and refresh was rejected: {exc}",
+                ) from exc
         raise AuthError("invalid_grant", "login credentials required")
 
     def _oauth_post(self, payload: dict[str, str]) -> dict[str, object]:
@@ -1157,7 +994,12 @@ class SpGroupClient:
             json.dumps(payload).encode("utf-8"),
             timeout=HTTP_TIMEOUT_SECONDS,
         )
-        body = _decode_json(response.body)
+        url = f"{IDENTITY_HOST}{OAUTH_TOKEN_PATH}"
+        if response.status >= 400 and response.status not in AUTH_REJECT_STATUSES:
+            # 429 or 5xx is Auth0 being unavailable, not a bad password. Reporting
+            # it as an auth failure would push the user into a pointless reauth.
+            raise TransportError(f"POST {url} returned HTTP {response.status}")
+        body = _require_json(response, "oauth token")
         mapping = body if isinstance(body, dict) else {}
         if response.status >= 400:
             error = str(mapping.get("error") or mapping.get("code") or "invalid_grant")
@@ -1223,29 +1065,45 @@ class SpGroupClient:
             timeout=timeout,
         )
 
-    def _optional_get(self, session: Session, path: str) -> object | None:
-        response = self._jarvis_get(
-            session, path, timeout=OPTIONAL_HTTP_TIMEOUT_SECONDS
-        )
+    def _optional_get(
+        self,
+        session: Session,
+        path: str,
+        timeout: int = OPTIONAL_HTTP_TIMEOUT_SECONDS,
+    ) -> object | None:
+        """GET a read the poll can do without: any failure logs and yields None."""
+        try:
+            response = self._jarvis_get(session, path, timeout=timeout)
+        except TransportError as exc:
+            _LOGGER.warning("skipping optional read: %s", exc)
+            return None
         return _optional_json(response)
 
     def _optional_post(
-        self, session: Session, path: str, payload: Mapping[str, object]
+        self,
+        session: Session,
+        path: str,
+        payload: Mapping[str, object],
+        timeout: int = OPTIONAL_HTTP_TIMEOUT_SECONDS,
     ) -> object | None:
-        response = self._jarvis_post(
-            session, path, payload, timeout=OPTIONAL_HTTP_TIMEOUT_SECONDS
-        )
+        try:
+            response = self._jarvis_post(session, path, payload, timeout=timeout)
+        except TransportError as exc:
+            _LOGGER.warning("skipping optional read: %s", exc)
+            return None
         return _optional_json(response)
 
     def _fetch_usage_with(self, session: Session) -> UsageReadings:
         me_response = self._jarvis_get(session, JARVIS_ME_PATH)
         self._raise_auth_if_denied(me_response, "utility account")
-        me_body = _require_mapping(_decode_json(me_response.body), "utility account")
+        me_body = _require_mapping(
+            _require_json(me_response, "utility account"), "utility account"
+        )
         premise = self._select_premise(me_body)
         info = _parse_premise(premise)
         charts_response = self._jarvis_get(session, f"{JARVIS_CHARTS_PATH}/{info.id}")
         self._raise_auth_if_denied(charts_response, "charts")
-        charts = _require_mapping(_decode_json(charts_response.body), "charts")
+        charts = _require_mapping(_require_json(charts_response, "charts"), "charts")
         electricity = _parse_utility(charts.get("elec"), "elec")
         water = _parse_utility(charts.get("water"), "water")
         gas = _parse_utility(charts.get("gas"), "gas")
@@ -1288,13 +1146,9 @@ class SpGroupClient:
     def _fetch_meter_reading(
         self, session: Session, premise_id: str
     ) -> tuple[MeterReadingInfo | None, tuple[MeterRegister, ...]]:
-        response = self._jarvis_get(session, f"{JARVIS_SMRD_PATH}/{premise_id}")
-        if response.status >= 400:
-            return None, ()
-        try:
-            body = _decode_json(response.body)
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return None, ()
+        body = self._optional_get(
+            session, f"{JARVIS_SMRD_PATH}/{premise_id}", timeout=HTTP_TIMEOUT_SECONDS
+        )
         return _parse_meter_reading(body), _parse_meter_registers(body)
 
     def _fetch_green_goals(
@@ -1347,11 +1201,15 @@ class SpGroupClient:
     def _fetch_eva(
         self, session: Session
     ) -> tuple[EvSessionInfo | None, EvChargeInfo | None, EvUnpaidInfo | None]:
-        response = self._jarvis_get(
-            session,
-            EVA_LATEST_SESSION_PATH,
-            timeout=OPTIONAL_HTTP_TIMEOUT_SECONDS,
-        )
+        try:
+            response = self._jarvis_get(
+                session,
+                EVA_LATEST_SESSION_PATH,
+                timeout=OPTIONAL_HTTP_TIMEOUT_SECONDS,
+            )
+        except TransportError as exc:
+            _LOGGER.warning("skipping optional read: %s", exc)
+            return None, None, None
         if _eva_scope_denied(response):
             return None, None, None
         ev_session = _parse_ev_session(_optional_json(response))
@@ -1389,16 +1247,21 @@ class SpGroupClient:
 
     def _fetch_tariff(self, electricity: UtilitySeries | None) -> TariffInfo | None:
         consumption = _tariff_consumption(electricity)
-        response = self._transport.request(
-            "GET",
-            f"{PUBLIC_HOST}{PRICEPLAN_PATH}?{urlencode({'consumption': consumption})}",
-            {
-                "User-Agent": USER_AGENT,
-                "Accept": "application/json",
-            },
-            None,
-            timeout=OPTIONAL_HTTP_TIMEOUT_SECONDS,
-        )
+        try:
+            response = self._transport.request(
+                "GET",
+                f"{PUBLIC_HOST}{PRICEPLAN_PATH}"
+                f"?{urlencode({'consumption': consumption})}",
+                {
+                    "User-Agent": USER_AGENT,
+                    "Accept": "application/json",
+                },
+                None,
+                timeout=OPTIONAL_HTTP_TIMEOUT_SECONDS,
+            )
+        except TransportError as exc:
+            _LOGGER.warning("skipping optional read: %s", exc)
+            return None
         body = _optional_json(response)
         if body is None:
             return None
@@ -1409,18 +1272,14 @@ class SpGroupClient:
     ) -> tuple[float | None, str | None]:
         if not premise.ppms_exists:
             return None, None
-        response = self._jarvis_get(session, f"{JARVIS_PPMS_PATH}/{premise.id}")
-        if response.status >= 400:
-            return None, None
-        try:
-            body = _decode_json(response.body)
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return None, None
+        body = self._optional_get(
+            session, f"{JARVIS_PPMS_PATH}/{premise.id}", timeout=HTTP_TIMEOUT_SECONDS
+        )
         if not isinstance(body, dict):
             return None, None
-        amount = _optional_float(body.get("amount"))
-        updated = _optional_str(body.get("updated_at"))
-        return amount, updated
+        return _optional_float(body.get("amount")), _optional_str(
+            body.get("updated_at")
+        )
 
     def _fetch_bills(
         self, session: Session, account_number: str | None
@@ -1428,25 +1287,18 @@ class SpGroupClient:
         if not account_number:
             return ()
         query = urlencode({"account_numbers": account_number})
-        response = self._jarvis_get(session, f"{NJORD_HISTORY_PATH}?{query}")
-        if response.status >= 400:
-            return ()
-        try:
-            body = _decode_json(response.body)
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return ()
-        return _parse_bills(body)
+        return _parse_bills(
+            self._optional_get(
+                session, f"{NJORD_HISTORY_PATH}?{query}", timeout=HTTP_TIMEOUT_SECONDS
+            )
+        )
 
     def _fetch_amount_due(
         self, session: Session, premise: PremiseInfo
     ) -> PayableInfo | None:
-        response = self._jarvis_get(session, NJORD_PAYABLES_PATH)
-        if response.status >= 400:
-            return None
-        try:
-            body = _decode_json(response.body)
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return None
+        body = self._optional_get(
+            session, NJORD_PAYABLES_PATH, timeout=HTTP_TIMEOUT_SECONDS
+        )
         return _parse_payable(body, premise.id, premise.account_number)
 
     def _fetch_ami(
@@ -1490,13 +1342,9 @@ class SpGroupClient:
             "grouped_by": grouped_by,
             "utility_type": "electric",
         }
-        response = self._jarvis_post(session, JARVIS_AMI_PATH, payload)
-        if response.status >= 400:
-            return ()
-        try:
-            body = _decode_json(response.body)
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return ()
+        body = self._optional_post(
+            session, JARVIS_AMI_PATH, payload, timeout=HTTP_TIMEOUT_SECONDS
+        )
         return _parse_ami_rows(body)
 
     def _raise_auth_if_denied(self, response: HttpResponse, label: str) -> None:

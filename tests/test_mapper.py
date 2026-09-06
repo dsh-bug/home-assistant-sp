@@ -31,9 +31,18 @@ from custom_components.sp_group.const import (
     UNIT_M3,
     UNIT_SGD,
 )
-from custom_components.sp_group.mapper import extra_attributes, sensors_from_usage
+from custom_components.sp_group.mapper import (
+    _currency,
+    extra_attributes,
+    sensors_from_usage,
+)
 
-from .conftest import FixtureTransport, billed_totals_from_charts_payload, fixture_client, load_fixture
+from .conftest import (
+    FixtureTransport,
+    billed_totals_from_charts_payload,
+    fixture_client,
+    load_fixture,
+)
 
 
 def test_sensors_match_energy_dashboard_contract() -> None:
@@ -108,9 +117,7 @@ def test_sensors_match_energy_dashboard_contract() -> None:
 
 
 def test_gas_only_charts_yield_gas_sensors() -> None:
-    client = fixture_client(
-        FixtureTransport(charts_fixture="jarvis_charts_gas.json")
-    )
+    client = fixture_client(FixtureTransport(charts_fixture="jarvis_charts_gas.json"))
     usage = client.fetch_usage()
     by_key = {spec.key: spec for spec in sensors_from_usage(usage)}
     assert SENSOR_KEY_ELECTRICITY not in by_key
@@ -126,3 +133,10 @@ def test_failed_auth_does_not_yield_sensor_values() -> None:
     with pytest.raises(AuthError):
         client.login("user@example.com", "wrong")
     assert sensors_from_usage(None) == []
+
+
+def test_amount_due_unit_follows_the_payable_currency() -> None:
+    """Monetary sensors carry the ISO code the API reported, not a fixed SGD."""
+    assert _currency("usd") == "USD"
+    assert _currency(None) == UNIT_SGD
+    assert _currency("S$") == UNIT_SGD

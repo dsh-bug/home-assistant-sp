@@ -11,7 +11,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfEnergy, UnitOfVolume
+from homeassistant.const import UnitOfEnergy, UnitOfTemperature, UnitOfVolume
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -27,6 +27,7 @@ _DEVICE_CLASS = {
     "water": SensorDeviceClass.WATER,
     "gas": SensorDeviceClass.GAS,
     "monetary": SensorDeviceClass.MONETARY,
+    "temperature": SensorDeviceClass.TEMPERATURE,
 }
 _STATE_CLASS = {
     "total_increasing": SensorStateClass.TOTAL_INCREASING,
@@ -36,7 +37,7 @@ _STATE_CLASS = {
 _UNITS = {
     "kWh": UnitOfEnergy.KILO_WATT_HOUR,
     "m³": UnitOfVolume.CUBIC_METERS,
-    "SGD": "SGD",
+    "°C": UnitOfTemperature.CELSIUS,
 }
 
 

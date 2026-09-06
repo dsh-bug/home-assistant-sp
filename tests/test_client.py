@@ -257,7 +257,6 @@ def test_me_forbidden_uses_server_error_description() -> None:
             if method == "GET" and parsed.path == JARVIS_ME_PATH:
                 return HttpResponse(
                     403,
-                    {"Content-Type": "application/json"},
                     b'{"error":"invalid_claim","error_description":"claim error"}',
                 )
             return super().request(method, url, headers, body, timeout=timeout)
@@ -295,9 +294,7 @@ def test_empty_gas_does_not_fail_fetch() -> None:
 
 
 def test_gas_only_charts_return_gas_series() -> None:
-    client = fixture_client(
-        FixtureTransport(charts_fixture="jarvis_charts_gas.json")
-    )
+    client = fixture_client(FixtureTransport(charts_fixture="jarvis_charts_gas.json"))
     usage = client.fetch_usage()
     assert usage.electricity is None
     assert usage.water is None
@@ -317,7 +314,6 @@ def test_amount_due_credit_is_negative_sgd() -> None:
             if method == "GET" and parsed.path == NJORD_PAYABLES_PATH:
                 return HttpResponse(
                     200,
-                    {"Content-Type": "application/json"},
                     b'{"payables":[{"account_number":"1234567890","currency":"SGD",'
                     b'"amount":-29631,"premises_id":"premise-001","system":"EBS",'
                     b'"recurring_enabled":false,"giro_enabled":false,'

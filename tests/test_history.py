@@ -7,7 +7,6 @@ from datetime import UTC, datetime
 
 import pytest
 
-from custom_components.sp_group.client import SG_TZ, PeriodReading
 from custom_components.sp_group.history import (
     cumulative_points,
     fold_half_hours,
@@ -16,6 +15,7 @@ from custom_components.sp_group.history import (
     trim_unreported,
 )
 from custom_components.sp_group.mapper import electricity_graph_periods
+from custom_components.sp_group.models import SG_TZ, PeriodReading
 
 from .conftest import billed_totals_from_charts_payload, fixture_client, load_fixture
 

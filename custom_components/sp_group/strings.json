@@ -114,14 +114,33 @@
         "name": "Unread notifications"
       },
       "bill_delivery": {
-        "name": "Bill delivery"
+        "name": "Bill delivery",
+        "state": {
+          "ebill": "E-bill",
+          "paper": "Paper"
+        }
       },
       "fcu": {
-        "name": "FCU"
+        "name": "FCU",
+        "state": {
+          "on": "On",
+          "off": "Off"
+        }
       },
       "tariff": {
         "name": "SP tariff"
       }
+    }
+  },
+  "exceptions": {
+    "auth_failed": {
+      "message": "SP Group rejected the stored e-account credentials: {error}"
+    },
+    "requires_verification": {
+      "message": "SP flagged this login as suspicious. Sign in once in the SP app, wait a few minutes, then retry: {error}"
+    },
+    "usage_failed": {
+      "message": "Could not fetch usage from SP Group: {error}"
     }
   }
 }

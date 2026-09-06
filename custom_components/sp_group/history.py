@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from .client import SG_TZ, BillInfo, PeriodReading
+from .models import SG_TZ, BillInfo, PeriodReading
 
 
 @dataclass(frozen=True)
