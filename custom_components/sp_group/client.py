@@ -388,6 +388,11 @@ def _oauth_headers() -> dict[str, str]:
     }
 
 
+def _factor_usable(factor: dict[str, object]) -> bool:
+    """Enrolled and not explicitly disabled."""
+    return bool(factor.get("id")) and factor.get("active") is not False
+
+
 def _pick_mfa_factor(
     authenticators: tuple[dict[str, object], ...],
 ) -> dict[str, object] | None:
@@ -396,17 +401,19 @@ def _pick_mfa_factor(
     Prefers the TOTP factor (stable, no short-lived out-of-band code), then a
     usable out-of-band factor (SMS, then email). A recovery-code factor is not
     a usable login factor and is ignored. Returns None when only recovery codes
-    (or nothing) are enrolled.
+    (or nothing) are enrolled. Factors with ``active: false`` are skipped.
     """
     for factor in authenticators:
-        if factor.get("authenticator_type") in {"otp", "totp"} and factor.get("id"):
+        if factor.get("authenticator_type") in {"otp", "totp"} and _factor_usable(
+            factor
+        ):
             return factor
     oob: dict[str, dict[str, object]] = {}
     for factor in authenticators:
-        if factor.get("authenticator_type") != "oob":
+        if factor.get("authenticator_type") != "oob" or not _factor_usable(factor):
             continue
         channel = factor.get("oob_channel")
-        if channel in {"sms", "email"} and factor.get("id"):
+        if channel in {"sms", "email"}:
             oob[channel] = factor
     sms = oob.get("sms")
     if sms is not None:
@@ -1069,7 +1076,9 @@ class SpGroupClient:
             "GET", AUTH0_MFA_AUTHENTICATORS_PATH, mfa_token
         )
         # Auth0 returns a bare array of factors here, not {"authenticators": [...]}.
-        rows: object = parsed.get("authenticators") if isinstance(parsed, dict) else parsed
+        rows: object = (
+            parsed.get("authenticators") if isinstance(parsed, dict) else parsed
+        )
         if not isinstance(rows, list):
             return ()
         authenticators: list[dict[str, object]] = []
@@ -1132,6 +1141,25 @@ class SpGroupClient:
         session = _session_from_oauth(mapping, None)
         self._session = session
         return session
+
+    def prepare_mfa(self, mfa_token: str) -> tuple[str, str | None]:
+        """Pick a factor and send the SMS/email challenge when that is the path.
+
+        Returns ``("oob", oob_code)`` only when the challenge produced a usable
+        code. Probe or challenge failures fall back to ``("totp", None)``.
+        """
+        try:
+            factor = _pick_mfa_factor(self.list_mfa_authenticators(mfa_token))
+        except (AuthError, UsageError, OSError):
+            return "totp", None
+        authenticator_id = _oob_factor_authenticator_id(factor)
+        if authenticator_id is None:
+            return "totp", None
+        try:
+            challenge = self.challenge_mfa(mfa_token, authenticator_id)
+        except (AuthError, UsageError, OSError):
+            return "totp", None
+        return _mfa_channel_from_challenge(factor, challenge)
 
     def refresh(self) -> Session:
         current = self._session

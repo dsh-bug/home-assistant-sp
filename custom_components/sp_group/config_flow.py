@@ -11,15 +11,7 @@ from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 
-from .client import (
-    AuthError,
-    MfaChallenge,
-    SpGroupClient,
-    UsageError,
-    _mfa_channel_from_challenge,
-    _oob_factor_authenticator_id,
-    _pick_mfa_factor,
-)
+from .client import AuthError, SpGroupClient, UsageError
 from .const import (
     CONF_ACCESS_TOKEN,
     CONF_ID_TOKEN,
@@ -144,24 +136,9 @@ class SpGroupConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             "entry": entry,
         }
         client = SpGroupClient()
-        factor: dict[str, object] | None = None
-        try:
-            authenticators = await self.hass.async_add_executor_job(
-                client.list_mfa_authenticators, exc.mfa_token
-            )
-            factor = _pick_mfa_factor(authenticators)
-        except (AuthError, UsageError, OSError):
-            factor = None
-        challenge: MfaChallenge | None = None
-        authenticator_id = _oob_factor_authenticator_id(factor)
-        if authenticator_id is not None:
-            try:
-                challenge = await self.hass.async_add_executor_job(
-                    client.challenge_mfa, exc.mfa_token, authenticator_id
-                )
-            except (AuthError, UsageError, OSError):
-                challenge = None
-        mfa_channel, mfa_oob_code = _mfa_channel_from_challenge(factor, challenge)
+        mfa_channel, mfa_oob_code = await self.hass.async_add_executor_job(
+            client.prepare_mfa, exc.mfa_token
+        )
         self._mfa_context["mfa_channel"] = mfa_channel
         if mfa_oob_code is not None:
             self._mfa_context["mfa_oob_code"] = mfa_oob_code

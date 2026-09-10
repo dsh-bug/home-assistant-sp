@@ -361,6 +361,29 @@ def test_pick_mfa_factor_recovery_code_only_is_not_a_factor() -> None:
     assert factor is None
 
 
+def test_pick_mfa_factor_skips_inactive_sms() -> None:
+    factor = _pick_mfa_factor(
+        (
+            {
+                "id": "sms|dev_inactive",
+                "authenticator_type": "oob",
+                "oob_channel": "sms",
+                "active": False,
+                "type": "phone",
+            },
+            {
+                "id": "email|dev_abc123",
+                "authenticator_type": "oob",
+                "oob_channel": "email",
+                "active": True,
+                "type": "email",
+            },
+        )
+    )
+    assert factor is not None
+    assert factor["oob_channel"] == "email"
+
+
 def _oob_sms_factor() -> dict[str, object]:
     return {
         "id": "sms|dev_abc123",
@@ -458,6 +481,30 @@ def test_challenge_mfa_rejects_non_prompt_binding_method() -> None:
     assert exc_info.value.error == "challenge_failed"
 
     channel, oob_code = _mfa_channel_from_challenge(_oob_sms_factor(), None)
+    assert channel == "totp"
+    assert oob_code is None
+
+
+def test_prepare_mfa_challenges_sms_and_returns_oob() -> None:
+    transport = FixtureTransport(mfa_oob=True)
+    client = SpGroupClient(transport=transport)
+
+    channel, oob_code = client.prepare_mfa("mfa-token")
+
+    assert channel == "oob"
+    assert oob_code == "oob-code"
+    assert transport.requests[0].method == "GET"
+    assert transport.requests[1].method == "POST"
+    challenged = transport.requests[1]
+    assert challenged.url == f"{AUTH0_MFA_OAUTH_HOST}{AUTH0_MFA_CHALLENGE_PATH}"
+
+
+def test_prepare_mfa_falls_back_when_binding_is_not_prompt() -> None:
+    transport = FixtureTransport(mfa_oob=True, mfa_challenge_binding="enter_code")
+    client = SpGroupClient(transport=transport)
+
+    channel, oob_code = client.prepare_mfa("mfa-token")
+
     assert channel == "totp"
     assert oob_code is None
 
