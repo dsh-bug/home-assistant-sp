@@ -59,6 +59,7 @@ class FixtureTransport:
     mfa_success: bool = False
     mfa_oob: bool = False
     mfa_challenge_binding: str = "prompt"
+    authenticators_bare: bool = False
     charts_fixture: str = "jarvis_charts.json"
     me_fixture: str = "jarvis_me.json"
     smrd_fixture: str | None = "jarvis_smrd.json"
@@ -126,10 +127,12 @@ class FixtureTransport:
             and origin == AUTH0_MFA_OAUTH_HOST
             and path == AUTH0_MFA_AUTHENTICATORS_PATH
         ):
-            return HttpResponse(
-                status=200,
-                body=load_fixture("oauth_token_mfa_authenticators_sms.json"),
+            fixture = (
+                "oauth_token_mfa_authenticators_bare.json"
+                if self.authenticators_bare
+                else "oauth_token_mfa_authenticators_sms.json"
             )
+            return HttpResponse(status=200, body=load_fixture(fixture))
         if (
             method == "POST"
             and origin == AUTH0_MFA_OAUTH_HOST

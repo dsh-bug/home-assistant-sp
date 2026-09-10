@@ -1032,8 +1032,12 @@ class SpGroupClient:
         mfa_token: str,
         *,
         body: dict[str, str] | None = None,
-    ) -> dict[str, object]:
-        """Request to the Auth0 MFA host (a different host than _oauth_post)."""
+    ) -> object:
+        """Request to the Auth0 MFA host (a different host than _oauth_post).
+
+        Returns the parsed JSON body (a dict, or a bare list for the
+        authenticators endpoint).
+        """
         headers = _oauth_headers()
         headers["Authorization"] = f"Bearer {mfa_token}"
         response = self._transport.request(
@@ -1048,23 +1052,24 @@ class SpGroupClient:
             # 429 or 5xx is Auth0 being unavailable, not a factor problem.
             raise TransportError(f"{method} {url} returned HTTP {response.status}")
         parsed = _require_json(response, "mfa")
-        mapping = parsed if isinstance(parsed, dict) else {}
         if response.status >= 400:
-            error = str(mapping.get("error") or mapping.get("code") or "invalid_grant")
+            detail = parsed if isinstance(parsed, dict) else {}
+            error = str(detail.get("error") or detail.get("code") or "invalid_grant")
             description = str(
-                mapping.get("error_description")
-                or mapping.get("description")
+                detail.get("error_description")
+                or detail.get("description")
                 or "authentication failed"
             )
             raise AuthError(error, description)
-        return mapping
+        return parsed
 
     def list_mfa_authenticators(self, mfa_token: str) -> tuple[dict[str, object], ...]:
         """List the enrolled Auth0 MFA factors for an in-progress login."""
-        mapping = self._auth0_mfa_request(
+        parsed = self._auth0_mfa_request(
             "GET", AUTH0_MFA_AUTHENTICATORS_PATH, mfa_token
         )
-        rows = mapping.get("authenticators")
+        # Auth0 returns a bare array of factors here, not {"authenticators": [...]}.
+        rows: object = parsed.get("authenticators") if isinstance(parsed, dict) else parsed
         if not isinstance(rows, list):
             return ()
         authenticators: list[dict[str, object]] = []
@@ -1083,7 +1088,7 @@ class SpGroupClient:
 
     def challenge_mfa(self, mfa_token: str, authenticator_id: str) -> MfaChallenge:
         """Trigger the SMS/email OOB challenge and return the code handle."""
-        mapping = self._auth0_mfa_request(
+        parsed = self._auth0_mfa_request(
             "POST",
             AUTH0_MFA_CHALLENGE_PATH,
             mfa_token,
@@ -1094,6 +1099,7 @@ class SpGroupClient:
                 "authenticator_id": authenticator_id,
             },
         )
+        mapping = parsed if isinstance(parsed, dict) else {}
         oob_code = mapping.get("oob_code")
         binding_method = mapping.get("binding_method")
         if not isinstance(oob_code, str) or not oob_code:

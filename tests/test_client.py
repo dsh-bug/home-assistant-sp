@@ -172,6 +172,29 @@ def test_mfa_oob_lists_challenges_and_submits_binding_code() -> None:
     }
 
 
+def test_list_mfa_authenticators_parses_bare_array_response() -> None:
+    # Regression: Auth0 /mfa/authenticators returns a BARE JSON array, not
+    # {"authenticators": [...]}. The old parser coerced it to {} and listed
+    # zero factors, so no OOB challenge (SMS) was ever fired.
+    transport = FixtureTransport(authenticators_bare=True)
+    client = SpGroupClient(transport=transport)
+
+    authenticators = client.list_mfa_authenticators("mfa-token")
+
+    assert {factor["id"] for factor in authenticators} == {
+        "recovery-code|dev_abc123",
+        "sms|dev_abc123",
+        "email|dev_abc123",
+    }
+    sms = next(
+        factor
+        for factor in authenticators
+        if factor["authenticator_type"] == "oob" and factor["oob_channel"] == "sms"
+    )
+    assert sms["id"] == "sms|dev_abc123"
+    assert sms["type"] == "phone"
+
+
 def test_pick_mfa_factor_sms_only() -> None:
     factor = _pick_mfa_factor(
         (
