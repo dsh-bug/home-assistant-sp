@@ -393,10 +393,14 @@ def _pick_mfa_factor(
 ) -> dict[str, object] | None:
     """Choose the login factor an account can use.
 
-    Prefers a usable out-of-band factor (SMS, then email), else the TOTP
-    factor. A recovery-code factor is not a usable login factor and is ignored.
-    Returns None when only recovery codes (or nothing) are enrolled.
+    Prefers the TOTP factor (stable, no short-lived out-of-band code), then a
+    usable out-of-band factor (SMS, then email). A recovery-code factor is not
+    a usable login factor and is ignored. Returns None when only recovery codes
+    (or nothing) are enrolled.
     """
+    for factor in authenticators:
+        if factor.get("authenticator_type") in {"otp", "totp"} and factor.get("id"):
+            return factor
     oob: dict[str, dict[str, object]] = {}
     for factor in authenticators:
         if factor.get("authenticator_type") != "oob":
@@ -407,13 +411,7 @@ def _pick_mfa_factor(
     sms = oob.get("sms")
     if sms is not None:
         return sms
-    email = oob.get("email")
-    if email is not None:
-        return email
-    for factor in authenticators:
-        if factor.get("authenticator_type") in {"otp", "totp"} and factor.get("id"):
-            return factor
-    return None
+    return oob.get("email")
 
 
 def _oob_factor_authenticator_id(factor: dict[str, object] | None) -> str | None:

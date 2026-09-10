@@ -233,6 +233,29 @@ def test_pick_mfa_factor_prefers_sms_over_email() -> None:
     assert factor["oob_channel"] == "sms"
 
 
+def test_pick_mfa_factor_prefers_totp_over_sms() -> None:
+    factor = _pick_mfa_factor(
+        (
+            {
+                "id": "sms|dev_abc123",
+                "authenticator_type": "oob",
+                "oob_channel": "sms",
+                "active": True,
+                "type": "phone",
+            },
+            {
+                "id": "totp|dev_abc123",
+                "authenticator_type": "otp",
+                "active": True,
+                "type": "totp",
+            },
+        )
+    )
+    assert factor is not None
+    assert factor["authenticator_type"] == "otp"
+    assert factor["id"] == "totp|dev_abc123"
+
+
 def test_pick_mfa_factor_otp_only_returns_otp_factor() -> None:
     factor = _pick_mfa_factor(
         (
